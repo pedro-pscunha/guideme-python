@@ -45,8 +45,11 @@ Each module survives the test.
   tuple, so the mapping from a shape of questions to a shape of answers is written out as
   overloads: a single question, a list, a dict, tuples of one to eight questions, and tuples of
   one to seven questions followed by one list or dict. `scripts/gen_ask_overloads.py` writes
-  them and `mise run gen-check` fails when the committed file is stale. Anything deeper works
-  at runtime and infers as `object`.
+  them and `mise run gen-check` fails when the committed file is stale. A shape outside that
+  list, a tuple nested inside a tuple for instance, works at runtime but is a checker error at
+  the call: `No overloads for "ask" match the provided arguments`. There is no annotation that
+  silences it, because the error is on the argument; flatten the shape, or ask the inner one
+  as its own call.
 - **Encounter order for a dict is insertion order.** Rust sorts, because its map is a
   `BTreeMap`. Python's dicts are ordered and insertion order is the idiom, so a caller who
   wants `q0` to be a particular question puts it first.
@@ -65,9 +68,14 @@ Each module survives the test.
   second, which also puts the two runtime constructors in the same order as their rubric:
   `choose_among("…", options)`.
 - **`Choice` and `Levels` validate where they are written.** `__init_subclass__` runs after the
-  members exist, so an empty rubric, a rubric of the wrong size, a non-text value or a second
-  `fallback(…)` raises `ConfigError` on the class statement rather than on the first request. A
-  type checker cannot see inside an enum body, so this is the only place those rules can fire.
+  members exist, so an empty rubric, a rubric of the wrong size, a non-text value, a second
+  `fallback(…)`, a repeated rubric text or a `fallback(…)` on a `Levels` raises `ConfigError` on
+  the class statement rather than on the first request. A type checker cannot see inside an enum
+  body, so this is the only place those rules can fire.
+- **`fallback(…)` is a `Choice` thing.** A score has no member to fall back to, it has an order,
+  so the level to use when a score is unsure is `.otherwise(level)` on the question. Marking a
+  `Levels` member is a `ConfigError` naming that method, matching the Rust derive, which rejects
+  the same mistake at compile time.
 - **`fallback(…)` returns a `str` subclass.** The member's value stays its rubric, exactly like
   every other member's, and the marking lives in the type rather than in a second attribute a
   caller could read or set.
@@ -75,6 +83,10 @@ Each module survives the test.
   integer and with any other `IntEnum`, which is the comparison this exists to reject. Four
   dunders typed `(self, other: Self)` make `Frustration.calm >= Urgency.low` a checker error
   instead.
+- **The timeout is per phase, not per attempt.** `httpx` gives connecting, writing, reading and
+  pool acquisition the whole of `timeout(…)` each, so a slow attempt can outlast it several
+  times over; Rust's `reqwest` applies one deadline to the attempt. The two SDKs differ here,
+  and guideme documents the difference rather than building a deadline `httpx` does not have.
 - **Async is asyncio.** `AsyncGuide` sleeps with `asyncio.sleep` and holds an
   `httpx.AsyncClient`. No `anyio` dependency, and the test suite runs coroutines with
   `asyncio.run` rather than adding a pytest plugin.
@@ -93,8 +105,24 @@ Each module survives the test.
   that may be unsure.
 - **Ids are visible.** `q{n}` appears on the wire, in `UnsureError` and in `guideme.answer`
   events. They are positions in encounter order, nothing more.
+- **Two members with the same text are one member.** Python's `Enum` makes the second an alias
+  of the first, which would leave a three-option rubric with two options and a marked fallback
+  that `fallback_member()` cannot find. A repeated rubric text is a `ConfigError` on the class
+  statement, naming the members that repeat.
 - **`Key` and `Rank`** are only meaningful through `choose_among` and `score_levels`. They are
   `NewType`s over `str` and `int`, so nothing else hands you one.
+- **The four scalars are brands, not validated types.** `Probability`, `Confidence`, `Key` and
+  `Rank` are `NewType`s, so `Probability(2.0)` and `Rank(99)` are accepted by the checker and by
+  the interpreter alike. What makes them trustworthy is that only the wire mints them, and it
+  validates there: a probability outside `0..=1` is a `ProtocolError` at parse time, an option or
+  a level outside the rubric is one at decode time. A caller who constructs one by hand is
+  outside that guarantee and gets no error saying so.
+- **`__init__` is not the surface.** `Guide(client, config)` and `AsyncGuide(client, config)`
+  name the internal `Client` and the private `_Config`, because Python has no private
+  constructor, not because either is supported. Build one through `Guide.builder()` or
+  `Guide.from_env()`; those are what validate the policy and the origin before a socket opens.
+- **`with_policy` shares the pool.** The copy holds the same client, so `close()` on either the
+  original or the copy closes the connection pool for both.
 - **`Question` is not exported.** The public surface is exactly `__all__`, and a question's
   type is whatever its constructor returns, so callers annotate by inference. Import it from
   `guideme.question` when you need to write the type of a stored question down.

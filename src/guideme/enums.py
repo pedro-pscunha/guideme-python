@@ -37,6 +37,17 @@ def fallback(rubric: str) -> str:
     return _Fallback(rubric)
 
 
+def _require_distinct(cls: type[Enum]) -> None:
+    """Refuse a repeated rubric: Python turns the second member into an alias of the first."""
+    aliased = [name for name, member in cls.__members__.items() if member.name != name]
+    if aliased:
+        detail = (
+            f"{cls.__name__}: {aliased} repeat another member's text, so Python makes each "
+            f"an alias and the rubric loses it; every member's text must be unique"
+        )
+        raise ConfigError(detail)
+
+
 def _require_text(cls: type[Enum], what: str) -> None:
     for member in cls:
         if not isinstance(member.value, str):
@@ -55,8 +66,9 @@ class Choice(Enum):
     """
 
     def __init_subclass__(cls) -> None:
-        """Validate the rubric where it is written: option count, text, one fallback."""
+        """Validate where it is written: distinct text, option count, text, one fallback."""
         super().__init_subclass__()
+        _require_distinct(cls)
         options = len(list(cls))
         if not MIN_OPTIONS <= options <= MAX_OPTIONS:
             detail = (
@@ -95,12 +107,14 @@ class Levels(Enum):
     Declaration order is level order, low to high. A member's value is that
     level's description. Members compare against each other, so a score reads
     as `answer >= Frustration.frustrated`; comparing two different `Levels`
-    classes is a type error.
+    classes is a type error, and a `TypeError` at runtime for a caller who is not
+    type-checked.
     """
 
     def __init_subclass__(cls) -> None:
-        """Validate the scale where it is written: level count and text."""
+        """Validate where it is written: distinct text, level count, text, no fallback."""
         super().__init_subclass__()
+        _require_distinct(cls)
         levels = len(list(cls))
         if not MIN_LEVELS <= levels <= MAX_LEVELS:
             detail = (
@@ -108,6 +122,13 @@ class Levels(Enum):
             )
             raise ConfigError(detail)
         _require_text(cls, "level")
+        for member in cls:
+            if isinstance(member.value, _Fallback):
+                detail = (
+                    f"{cls.__name__}.{member.name}: fallback(...) is not allowed on Levels; "
+                    f"use .otherwise(level) on the question"
+                )
+                raise ConfigError(detail)
 
     @property
     def index(self) -> int:
@@ -126,17 +147,25 @@ class Levels(Enum):
         return members[index] if 0 <= index < len(members) else None
 
     def __lt__(self, other: Self) -> bool:
-        """Order by declaration: an earlier level is lower."""
+        """Order by declaration: an earlier level is lower. Another scale raises."""
+        if type(other) is not type(self):
+            return NotImplemented
         return self.index < other.index
 
     def __le__(self, other: Self) -> bool:
-        """Order by declaration: an earlier or equal level is not higher."""
+        """Order by declaration: an earlier or equal level is not higher. Another scale raises."""
+        if type(other) is not type(self):
+            return NotImplemented
         return self.index <= other.index
 
     def __gt__(self, other: Self) -> bool:
-        """Order by declaration: a later level is higher."""
+        """Order by declaration: a later level is higher. Another scale raises."""
+        if type(other) is not type(self):
+            return NotImplemented
         return self.index > other.index
 
     def __ge__(self, other: Self) -> bool:
-        """Order by declaration: a later or equal level is not lower."""
+        """Order by declaration: a later or equal level is not lower. Another scale raises."""
+        if type(other) is not type(self):
+            return NotImplemented
         return self.index >= other.index

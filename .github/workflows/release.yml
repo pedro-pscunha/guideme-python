@@ -27,6 +27,19 @@ jobs:
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
+      # The tag names the version that reaches PyPI, and a published version is
+      # permanent, so a tag that disagrees with pyproject.toml stops here rather
+      # than publishing a number nobody meant. Checked before the gate, which is
+      # the slow part.
+      - name: the tag matches the project version
+        run: |
+          version="v$(uv version --short --no-sync)"
+          if [ "${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match the project version ${version}" >&2
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} matches the project version"
+
       - name: mise run sync
         run: mise run sync
 

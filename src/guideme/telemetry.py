@@ -10,7 +10,7 @@ the answer events, `guideme.api` the HTTP spans and the retry events.
 
 from contextlib import AbstractContextManager
 from datetime import timedelta
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 from opentelemetry.trace import Span, SpanKind, StatusCode, get_tracer
 
@@ -41,7 +41,22 @@ RETRY_EVENT = "guideme.retry"
 """One per throttled attempt, just before the wait. The warning of the Rust SDK."""
 
 _MILLISECOND = timedelta(milliseconds=1)
-_VERSION = version("guideme")
+
+
+def _installed_version() -> str | None:
+    """The distribution's version, or `None` where there is no distribution to read.
+
+    A frozen bundle, a vendored copy, or an import straight off `src` has no installed
+    metadata. An instrumentation scope without a version is valid, so that is what the
+    tracers get; refusing to import would be the wrong trade.
+    """
+    try:
+        return version("guideme")
+    except PackageNotFoundError:
+        return None
+
+
+_VERSION = _installed_version()
 _tracer = get_tracer("guideme", _VERSION)
 _api_tracer = get_tracer("guideme.api", _VERSION)
 

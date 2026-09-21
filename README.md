@@ -49,6 +49,12 @@ every option is handled, so adding a department turns the `match` above into an 
 you handle it. `from_env()` reads `TYPESAFE_API_KEY`, and `sales`, marked with `fallback(…)`,
 is also the answer when confidence is below the floor.
 
+Two members may not share a rubric: Python would make the second an alias of the first, so a
+repeat is a `ConfigError` on the class statement rather than a rubric quietly one option
+short. `fallback(…)` marks a `Choice` member and only a `Choice` member; a `Levels` is
+ordered, so the level to fall back to when a score is unsure is `.otherwise(level)` on the
+question.
+
 That example is `tests/typing/readme.py`, which the gate type-checks with an `assert_type`
 after every `ask`, so what is on this page cannot drift from what the package infers.
 
@@ -229,7 +235,8 @@ Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and 
 - The scalars are validated once and never re-checked: `Probability` and `Confidence` hold the
   unit-interval numbers on `Verdict`, `Ranked` and `Scored`, `Key` and `Rank` are what a runtime
   rubric answers with, `Model` names the model to ask, and `ApiKey` carries the key without ever
-  printing it.
+  printing it. The first four are `NewType` brands, so the guarantee is that only the wire mints
+  them, not that `Probability(2.0)` is rejected; it is not.
 - `guideme.policy.resolve(answer, thresholds)` is the pure decision function. `spec/` holds
   its JSON Schemas and 42 golden vectors, vendored from
   [guideme-rust](https://github.com/pedro-pscunha/guideme-rust), which publishes the contract.

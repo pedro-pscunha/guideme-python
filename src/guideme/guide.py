@@ -43,7 +43,14 @@ MODEL_VAR = "GUIDEME_MODEL"
 """Optional model override for `from_env`."""
 
 DEFAULT_TIMEOUT = timedelta(seconds=30)
-"""How long one attempt may take. Worst case is `(max_retries + 1)` of these, plus backoff."""
+"""How long one phase of one attempt may take.
+
+`httpx` spends this budget per phase, not per attempt: connecting, writing, reading and
+waiting for a pooled connection each get the whole of it, so one attempt can take several
+of these before it gives up. Rust's `reqwest` deadline covers the attempt instead, and the
+two SDKs differ here on purpose rather than by oversight. Worst case is
+`(max_retries + 1)` attempts, plus the backoff between them.
+"""
 
 
 @final
@@ -88,6 +95,10 @@ def _prepare(shape: object, state: Json, config: _Config) -> _Prepared:
     Runs before any span is opened, so the errors it raises, an empty batch or a state
     that is not JSON-shaped, are never recorded on one. Both are the caller's mistake
     and neither reached the API.
+
+    Every question's instructions go through the same serialiser the state does, and its
+    result is thrown away: a `NaN`, an infinity or a value `json` cannot represent is a
+    `ConfigError` here rather than a `null` the API reads as an absent field.
     """
     state_text = dumps(state, "state")
     plan = Plan(base=config.policy)
@@ -95,6 +106,8 @@ def _prepare(shape: object, state: Json, config: _Config) -> _Prepared:
     if not plan.specs:
         detail = "a batch needs at least one question"
         raise ConfigError(detail)
+    for qid, (instructions, _spec) in plan.specs.items():
+        _ = dumps(instructions, f"question {qid} instructions")
     questions = {
         qid: question_to_wire(instructions, spec)
         for qid, (instructions, spec) in plan.specs.items()
@@ -197,7 +210,10 @@ class Guide(SyncAskOverloads):
         return GuideBuilder()
 
     def with_policy(self, policy: Policy) -> "Guide":
-        """A guide sharing this client, with `policy` patched over this one's."""
+        """A guide sharing this client, with `policy` patched over this one's.
+
+        The connection pool is shared, so `close()` on either guide closes it for both.
+        """
         return Guide(self._client, _merged(self._config, policy))
 
     def models(self) -> tuple[ModelInfo, ...]:
@@ -245,7 +261,10 @@ class AsyncGuide(AsyncAskOverloads):
         return GuideBuilder()
 
     def with_policy(self, policy: Policy) -> "AsyncGuide":
-        """A guide sharing this client, with `policy` patched over this one's."""
+        """A guide sharing this client, with `policy` patched over this one's.
+
+        The connection pool is shared, so `close()` on either guide closes it for both.
+        """
         return AsyncGuide(self._client, _merged(self._config, policy))
 
     async def models(self) -> tuple[ModelInfo, ...]:
@@ -322,7 +341,12 @@ class GuideBuilder:
         return self
 
     def timeout(self, per_attempt: timedelta) -> Self:
-        """Timeout for one attempt; 30 s by default."""
+        """Timeout for one phase of one attempt; 30 s by default.
+
+        `httpx` applies it to connecting, writing, reading and pool acquisition
+        separately rather than as one deadline for the attempt, so an attempt that is
+        slow in more than one phase can outlast it. See `DEFAULT_TIMEOUT`.
+        """
         if per_attempt <= timedelta():
             detail = f"timeout {per_attempt} is not positive"
             raise ConfigError(detail)

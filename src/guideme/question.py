@@ -446,5 +446,14 @@ def score[L: Levels](levels: type[L], instructions: Json) -> ScoreQuestion[L]:
 
 
 def score_levels(instructions: Json, levels: Sequence[str]) -> ScoreQuestion[Rank]:
-    """Rate on runtime levels, low to high. Plain output: `Rank`."""
+    """Rate on runtime levels, low to high. Plain output: `Rank`.
+
+    A `str` is a `Sequence[str]` of its own characters, so `score_levels("…", "abc")`
+    would quietly ask about a three-letter scale. It is a `ConfigError` instead.
+    """
+    if isinstance(levels, str | bytes):
+        detail = (
+            f"levels must be a sequence of level descriptions, got a single {type(levels).__name__}"
+        )
+        raise ConfigError(detail)
     return _score(instructions, tuple(levels), Rank)

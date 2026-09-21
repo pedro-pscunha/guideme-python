@@ -38,10 +38,20 @@ class _Sent(BaseModel):
     """Base of everything guideme puts on the wire.
 
     `extra="forbid"` because guideme builds these: an unexpected field is a bug here,
-    not a message from the API.
+    not a message from the API. `allow_inf_nan=False` because pydantic's default is to
+    serialise a `NaN` or an infinity as `null`, which would turn a caller's broken
+    number into a field the API reads as absent; refused here instead. The serialiser
+    setting is the belt to that brace: nothing can reach it, and if something did it
+    would put `NaN` on the wire and be rejected rather than silently dropped.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+        allow_inf_nan=False,
+        ser_json_inf_nan="constants",
+    )
 
 
 class _Received(BaseModel):
@@ -188,7 +198,19 @@ class ModelsResponse(_Received):
 
 
 def question_to_wire(instructions: Json, spec: Spec) -> Question:
-    """Put one question's spec on the wire. The spec was validated where it was written."""
+    """Put one question's spec on the wire. The spec was validated where it was written.
+
+    Only the instructions are the caller's, so a value that is not JSON-shaped is their
+    configuration error rather than a `pydantic.ValidationError` escaping this package.
+    """
+    try:
+        return _question(instructions, spec)
+    except ValidationError as error:
+        detail = f"instructions are not JSON-shaped: {validation_detail(error)}"
+        raise ConfigError(detail) from error
+
+
+def _question(instructions: Json, spec: Spec) -> Question:
     match spec:
         case NoulSpec(criteria=criteria):
             wire = None if criteria is None else NoulCriteria(true=criteria.yes, false=criteria.no)

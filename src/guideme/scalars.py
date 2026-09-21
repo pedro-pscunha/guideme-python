@@ -11,16 +11,34 @@ from typing import NewType, Self, final, override
 from guideme.errors import ConfigError, ProtocolError
 
 Probability = NewType("Probability", float)
-"""A probability in the closed unit interval; only `probability()` makes one."""
+"""A probability in the closed unit interval; only `probability()` makes one.
+
+Branded, not validated: a `NewType` is the checker's, so `Probability(2.0)` is accepted
+by the checker and by the interpreter alike. The range is checked once, by `probability()`
+at the wire, and nothing else in this package mints one, so every value a caller is handed
+is already in range and nothing downstream re-checks it.
+"""
 
 Confidence = NewType("Confidence", float)
-"""A confidence in the closed unit interval; only `confidence()` makes one."""
+"""A confidence in the closed unit interval; only `confidence()` makes one.
+
+Branded the same way `Probability` is: `Confidence(2.0)` passes both the checker and the
+interpreter, and `confidence()` at the wire is the one place the range is checked.
+"""
 
 Key = NewType("Key", str)
-"""A runtime option key: the plain output of `choose_among`."""
+"""A runtime option key: the plain output of `choose_among`.
+
+Branded, not validated. `Key("ghost")` is accepted; membership of a rubric is what
+`choose_among`'s reader checks, and a key outside it is a `ProtocolError`.
+"""
 
 Rank = NewType("Rank", int)
-"""A runtime level index: the plain output of `score_levels`."""
+"""A runtime level index: the plain output of `score_levels`.
+
+Branded, not validated. `Rank(99)` is accepted; being a level of the question asked is
+what `score_levels`' reader checks, and an index outside it is a `ProtocolError`.
+"""
 
 
 def _unit(value: float, what: str) -> float:
@@ -52,9 +70,9 @@ class ApiKey:
     __slots__ = ("_value",)
 
     def __init__(self, value: str) -> None:
-        """Wrap a key. Raises `ConfigError` when it is empty."""
-        if not value:
-            detail = "api key is empty"
+        """Wrap a key. Raises `ConfigError` when it is empty or only whitespace."""
+        if not value.strip():
+            detail = "api key is empty or only whitespace"
             raise ConfigError(detail)
         self._value = value
 
@@ -90,6 +108,12 @@ class Model:
     """A model name or alias accepted by the `model` field."""
 
     name: str
+
+    def __post_init__(self) -> None:
+        """Validate: a model name may not be empty or only whitespace."""
+        if not self.name.strip():
+            detail = "model name is empty or only whitespace"
+            raise ConfigError(detail)
 
     @classmethod
     def latest(cls) -> Self:

@@ -26,7 +26,7 @@ and `spec/` pins it. The live TypeSafe docs are the source of truth for the wire
 | `src/guideme/scalars.py` | `Probability`, `Confidence`, `Key`, `Rank`, `ApiKey`, `Model` | validation happens once, here; `ApiKey` never prints |
 | `src/guideme/errors.py` | the `GuidemeError` tree and `kind` | `kind` is the cross-SDK name and the `error.type` value; imports nothing from `guideme` |
 | `src/guideme/policy.py` | `resolve`, `Policy`, `Thresholds`, `Verdict`, the answer and outcome dataclasses | pure: no I/O, no caller enums, keys and level indices only |
-| `src/guideme/enums.py` | `Choice`, `Levels`, `fallback` | a member's name is its wire key and its value is its rubric; both validate at class definition |
+| `src/guideme/enums.py` | `Choice`, `Levels`, `fallback` | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there |
 | `src/guideme/question.py` | question kinds, constructors, `Ranked`, `Scored`, the unsure ladder | a question is inert until asked; the reader travels with it |
 | `src/guideme/ask.py` | shapes: `encode`, `decode`, `Plan` | ids are `q0..qN` in encounter order, insertion order for a dict |
 | `src/guideme/_ask_overloads.py` | the typed `ask` surfaces | GENERATED; edit `scripts/gen_ask_overloads.py` and run `mise run gen` |
@@ -77,6 +77,14 @@ the rest are checked in review.
 - **Fail loudly.** An unknown answer kind, an option or level outside the rubric, a malformed
   body, bad thresholds, an empty batch, a duplicate key: each is a typed error. Never a
   default, never a log-and-continue.
+- **A rubric's text is unique, and a rubric is the caller's to get wrong once.** Two members of
+  a `Choice` or a `Levels` sharing a value are aliases in Python, not two options, so a repeat
+  is a `ConfigError` on the class statement; so is `fallback(…)` on a `Levels`, which has
+  `.otherwise(level)` instead. Both fire where the enum is written, like the Rust derive's
+  compile errors.
+- **Nothing outside `api/` may see a `pydantic` exception.** A caller's state or instructions
+  that pydantic refuses leaves `api/` as a `ConfigError`, and a `NaN` or an infinity is refused
+  rather than serialised as `null`.
 - **The API key is never printed.** `ApiKey` prints as `ApiKey(***)` through both `repr` and
   `str`, is not JSON serialisable, refuses to pickle, is on no span, and appears in no error.
 - **State is user data.** Its content never reaches a span unless `record_state(True)` was set;

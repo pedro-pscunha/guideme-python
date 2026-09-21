@@ -2,9 +2,8 @@
 
 ## Supported versions
 
-`guideme` is at 0.1.0 and is not yet on PyPI. Once it is, the newest released version is the
-only supported one. A published version on PyPI can never be replaced, so a fix ships as a new
-version and the affected one is yanked.
+The supported version is the latest release on PyPI. A published version can never be
+replaced, so a fix ships as a new version and the affected one is yanked.
 
 ## Reporting a vulnerability
 
@@ -23,7 +22,10 @@ In scope, because this package owns them:
 - **The API key.** `ApiKey` prints as `ApiKey(***)` through both `repr` and `str`, is not JSON
   serialisable, and refuses to pickle; `tests/test_redaction.py` proves it. That the key is
   never recorded on a span and never returned in an error is an invariant held by a test and in
-  review. Any path that puts the key somewhere a caller can read it is a vulnerability.
+  review. A client holds the `ApiKey` rather than the bearer header, which is built per request,
+  and the `httpx` error chained onto a `TransportError` has its authorization header removed
+  before it is chained, so neither a `vars()` nor a traceback carries the key. Any path that
+  puts the key somewhere a caller can read it is a vulnerability.
 - **State confidentiality.** The state passed to `ask` is user data. Its content never reaches a
   span unless `record_state(True)` was set; its length, `guideme.state.bytes`, always does.
   Recording the content without that opt-in is a defect here.
