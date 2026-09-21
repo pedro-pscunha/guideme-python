@@ -1,5 +1,5 @@
-# A collector that prints everything it receives. Enough to see exactly what guideme
-# exports; swap the debug exporter for your backend's when you are done looking.
+# A collector that prints everything it receives, on both signals. Enough to see exactly
+# what guideme exports; swap the debug exporter for your backend's when you are done looking.
 #
 #   docker run --rm -d --name guideme-otel -p 4317:4317 -p 4318:4318 \
 #     -v "$PWD:/conf:ro" \
@@ -21,5 +21,8 @@ exporters:
 service:
   pipelines:
     traces:
+      receivers: [otlp]
+      exporters: [debug]
+    logs:
       receivers: [otlp]
       exporters: [debug]

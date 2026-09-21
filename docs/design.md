@@ -97,14 +97,24 @@ Each module survives the test.
   an error span status rather than an error-level record. Anything without a convention is
   namespaced `guideme.`. The package depends on `opentelemetry-api` only and installs no
   provider; `docs/observability.md` shows the exporter side.
+- **An answer is a span event and a log record, and the caller picks.** Rust emits one
+  `tracing` event and lets the subscriber fan it out, so its example filters events off the
+  span exporter to store each one once. There is no subscriber here, so the library makes both
+  calls and `events(...)` is the filter the application would otherwise have written. `both` is
+  the default because a record costs nothing until a `LoggerProvider` exists, which keeps the
+  library's unconfigured behaviour the same as Rust's. The mode rides on `_Config`, so a
+  `with_policy` copy keeps it and `Guide` and `AsyncGuide` cannot differ.
 
 ## Sharp edges
 
 - **A batch is atomic.** One answer that resolves to `UnsureError`, or to `ProtocolError`,
   fails the whole call. Use `.otherwise(…)`, an enum fallback, or `.detail()` on the questions
   that may be unsure.
-- **Ids are visible.** `q{n}` appears on the wire, in `UnsureError` and in `guideme.answer`
-  events. They are positions in encounter order, nothing more.
+- **Ids are visible.** `q{n}` appears on the wire, in `UnsureError` and in every
+  `guideme.answer`, on both signals. They are positions in encounter order, nothing more.
+- **Correlation is the active span, not an argument.** A log record resolves the OpenTelemetry
+  context when it is built, so a record built outside the `with` block that opened the span
+  would silently lose its ids. Every emit stays inside it.
 - **Two members with the same text are one member.** Python's `Enum` makes the second an alias
   of the first, which would leave a three-option rubric with two options and a marked fallback
   that `fallback_member()` cannot find. A repeated rubric text is a `ConfigError` on the class

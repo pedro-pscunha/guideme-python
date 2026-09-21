@@ -1,22 +1,38 @@
-"""guideme against the live TypeSafe API, exporting every span over OTLP.
+"""guideme against the live TypeSafe API, exporting spans and log records over OTLP.
 
-`README.md` next to this file has the collector recipe and how to run this. The
-exporter is configured entirely by the standard OTLP environment variables, so
-pointing it at a vendor instead of the local collector is a matter of setting
+`README.md` next to this file has the collector recipe and how to run this. Both
+exporters are configured entirely by the standard OTLP environment variables, so
+pointing them at a vendor instead of the local collector is a matter of setting
 those. With no collector listening the program still runs and still prints its
-answers; the exporter reports the failure when it is shut down.
+answers; the exporters report the failure when they are shut down.
 """
 
 import os
 from contextlib import closing
 
 from opentelemetry import trace
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-from guideme import Choice, Guide, Levels, Policy, UnsureError, choose, fallback, noul, score
+from guideme import (
+    ApiKey,
+    Choice,
+    ConfigError,
+    Guide,
+    Levels,
+    Policy,
+    UnsureError,
+    choose,
+    fallback,
+    noul,
+    score,
+)
 
 TICKET = (
     "Help! My payouts have been failing for 3 days and nobody answers. "
@@ -40,25 +56,43 @@ class Frustration(Levels):
     very_angry = "Very angry"
 
 
-def telemetry() -> TracerProvider:
-    """Install a provider that batches spans to an OTLP collector over gRPC."""
+def telemetry() -> tuple[TracerProvider, LoggerProvider]:
+    """Install providers that batch spans and log records to an OTLP collector over gRPC."""
     # Resource.create() reads OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES itself, and an
     # attribute passed here beats them, so the default applies only when nothing is set.
     named = os.environ.get("OTEL_SERVICE_NAME")
     resource = Resource.create() if named else Resource.create({SERVICE_NAME: "support-triage"})
-    provider = TracerProvider(resource=resource)
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-    trace.set_tracer_provider(provider)
-    return provider
+    traces = TracerProvider(resource=resource)
+    traces.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    trace.set_tracer_provider(traces)
+    logs = LoggerProvider(resource=resource)
+    logs.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+    set_logger_provider(logs)
+    return traces, logs
+
+
+def configured() -> Guide:
+    """A guide from the environment that writes each event once, as a log record.
+
+    `Guide.from_env()` would cover the key on its own, but the signal is a builder
+    setting and both pipelines here point at the same collector, so `events("log")` is
+    what keeps an answer from being stored twice. It is this example's counterpart to the
+    Rust example's `filter_fn(|meta| meta.is_span())`.
+    """
+    key = os.environ.get("TYPESAFE_API_KEY")
+    if key is None:
+        detail = "TYPESAFE_API_KEY is not set"
+        raise ConfigError(detail)
+    return Guide.builder().api_key(ApiKey(key)).events("log").build()
 
 
 def run(guide: Guide) -> None:
     """Ask the support-triage questions and print every answer."""
-    # One question: one ask span, one answer event.
+    # One question: one ask span, one answer record.
     urgent = guide.ask(noul("Does this convey urgency?"), TICKET)
     print(f"urgent: {urgent}")
 
-    # Three questions in one request: one ask span, three answer events.
+    # Three questions in one request: one ask span, three answer records.
     dept, mood, refund = guide.ask(
         (
             choose(Department, "Which team should handle this?").min_confidence(0.6),
@@ -86,13 +120,14 @@ def run(guide: Guide) -> None:
 
 
 def main() -> None:
-    """Install the exporter, ask the questions, and flush whatever happened."""
-    provider = telemetry()
+    """Install the exporters, ask the questions, and flush whatever happened."""
+    traces, logs = telemetry()
     try:
-        with closing(Guide.from_env()) as guide:
+        with closing(configured()) as guide:
             run(guide)
     finally:
-        provider.shutdown()
+        traces.shutdown()
+        logs.shutdown()
 
 
 if __name__ == "__main__":
