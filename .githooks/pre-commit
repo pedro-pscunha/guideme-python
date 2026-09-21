@@ -5,10 +5,11 @@
 # 1) gitleaks on the staged change. A repo-local core.hooksPath takes this
 #    repository out of any global hooks directory, so this is the only secret
 #    scan left and it has to live here.
-# 2) the fast half of the gate: formatting and ruff. Types, pylint, tests,
-#    build and audit run at push. Both read the working tree, not the index:
-#    with a partial `git add -p` they check the files as they are on disk, not
-#    as they are being committed.
+# 2) the fast half of the gate: formatting, ruff, and the staleness check on
+#    the generated overloads. Types, pylint, tests, build and audit run at
+#    push. All of them read the working tree, not the index: with a partial
+#    `git add -p` they check the files as they are on disk, not as they are
+#    being committed.
 #
 # `git commit --no-verify` skips all of it.
 set -euo pipefail
@@ -24,3 +25,4 @@ refuse_on_secrets "$status" "staged change" "gitleaks git --staged -v" || exit 1
 mise="$(resolve_mise)" || exit 1
 "$mise" run fmt-check
 "$mise" run lint
+"$mise" run gen-check
