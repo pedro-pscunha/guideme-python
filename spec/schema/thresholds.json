@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thresholds",
+  "description": "Fully settled, validated thresholds: the input of `resolve` and of every golden vector.",
+  "type": "object",
+  "properties": {
+    "min_confidence": {
+      "description": "Choice/score confidence floor.",
+      "type": "number",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "no_below": {
+      "description": "Noul no boundary (inclusive); must not exceed `yes_above`.",
+      "type": "number",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "yes_above": {
+      "description": "Noul yes boundary (inclusive).",
+      "type": "number",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": 0.0
+    }
+  },
+  "required": [
+    "yes_above",
+    "no_below",
+    "min_confidence"
+  ]
+}

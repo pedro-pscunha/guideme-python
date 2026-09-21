@@ -1,0 +1,32 @@
+name: Advisories
+
+# A dependency does not have to change for it to become vulnerable. CI audits
+# the lock file on every pull request; this re-audits the unchanged lock file
+# against a moving advisory database.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UV_LOCKED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  audit:
+    name: audit (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: mise run sync
+        run: mise run sync
+
+      - name: mise run audit
+        run: mise run audit

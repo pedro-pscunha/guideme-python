@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# guideme pre-push hook. Tracked, and activated by `mise run hooks`, which
+# points this repository's core.hooksPath at this directory.
+#
+# Git hands the refs being pushed on stdin, one per line:
+#     <local ref> <local sha> <remote ref> <remote sha>
+# That list, not HEAD, is what is leaving this machine. Pushing a branch other
+# than the checked-out one, `git push --all`, or a push from a detached HEAD all
+# put something on stdin that HEAD-based logic would never look at. The remote
+# ref is the one to classify on: the local side is whatever the user typed
+# (`HEAD`, a sha, a branch), the remote side is always fully qualified.
+#
+# 1) gitleaks over every commit in every pushed range. The index is clean at
+#    push time, so this is also the backstop for a `git commit --no-verify`.
+#    gitleaks exits 0 when its own `git log` fails, so each range is proven
+#    with git first; a range that cannot be listed is refused, not trusted.
+# 2) mise run check — the whole gate — when at least one branch with content is
+#    being pushed. A delete or a tag-only push carries no new tree to check.
+#    The gate reads the working tree; when the pushed commit is not HEAD, that
+#    is said out loud rather than hidden.
+#
+# `git push --no-verify` skips all of it.
+set -euo pipefail
+
+dir="$(cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=.githooks/_lib.sh
+. "$dir/_lib.sh"
+
+remote_name="${1:-origin}"
+zero='0000000000000000000000000000000000000000'
+head="$(git rev-parse HEAD)"
+branches=0
+head_is_pushed=0
+
+while read -r _local_ref local_sha remote_ref remote_sha; do
+	# A delete carries nothing new. Nothing to scan, nothing to gate.
+	[ "$local_sha" = "$zero" ] && continue
+
+	case "$remote_ref" in
+	refs/heads/*) branches=$((branches + 1)) ;;
+	esac
+	[ "$local_sha" = "$head" ] && head_is_pushed=1
+
+	if [ "$remote_sha" != "$zero" ] && git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
+		range=("$remote_sha..$local_sha")
+	else
+		# New on the remote, or the remote moved and this clone has not fetched
+		# it yet: everything this remote is not already known to have.
+		range=("$local_sha" --not --remotes="$remote_name")
+	fi
+
+	scanned="push to $remote_ref"
+	if ! git rev-list --quiet "${range[@]}" -- 2>/dev/null; then
+		refuse_on_secrets 1 "$scanned" "" || exit 1
+	fi
+
+	status=0
+	scan_for_secrets git --log-opts="${range[*]}" || status=$?
+	refuse_on_secrets "$status" "$scanned" \
+		"gitleaks git --log-opts='${range[*]}' -v" || exit 1
+done
+
+if [ "$branches" -eq 0 ]; then
+	echo "pre-push: no branch content in this push; the gate is not run." >&2
+	exit 0
+fi
+if [ "$head_is_pushed" -eq 0 ]; then
+	echo "pre-push: the pushed commit is not HEAD; the gate checks the working tree, not the pushed tree." >&2
+fi
+
+mise="$(resolve_mise)" || exit 1
+exec "$mise" run check

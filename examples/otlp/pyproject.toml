@@ -1,0 +1,33 @@
+[project]
+name = "guideme-otlp-example"
+version = "0.0.0"
+description = "Runnable guideme example, resolved outside the library's lock file"
+requires-python = ">=3.12"
+dependencies = ["guideme"]
+
+[dependency-groups]
+dev = ["ruff==0.16.8", "pyright==1.1.414"]
+
+# The example pins guideme by path, so `uv sync --locked` here fails when the
+# library moves under it instead of silently resolving around it.
+[tool.uv.sources]
+guideme = { path = "../..", editable = true }
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+
+[tool.ruff.lint.per-file-ignores]
+"*.py" = [
+  "T201",    # a runnable example prints
+  "INP001",  # an example is a program, not a package
+]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+reportMatchNotExhaustive = "error"
+reportImplicitOverride = "error"
+reportUnusedCallResult = "error"

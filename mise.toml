@@ -1,0 +1,111 @@
+[tools]
+uv = "0.12.17"
+"aqua:gitleaks/gitleaks" = "8.30.1"
+
+[tasks.sync]
+description = "Install the locked environment"
+run = "uv sync --locked --all-groups"
+
+[tasks.fmt]
+description = "Format"
+run = "uv run --locked ruff format ."
+
+[tasks.fmt-check]
+description = "Fail if anything is unformatted"
+run = "uv run --locked ruff format --check ."
+
+[tasks.gen]
+description = "Regenerate the ask overloads"
+run = "uv run --locked python scripts/gen_ask_overloads.py > src/guideme/_ask_overloads.py"
+
+[tasks.gen-check]
+description = "Fail if the generated overloads are stale"
+run = "uv run --locked python scripts/gen_ask_overloads.py | diff -u src/guideme/_ask_overloads.py -"
+
+[tasks.lint]
+description = "ruff, every rule"
+run = "uv run --locked ruff check ."
+
+[tasks.types]
+description = "pyright strict"
+run = "uv run --locked pyright"
+
+[tasks.pylint]
+description = "pylint, every check"
+run = "uv run --locked pylint src tests scripts examples/otlp"
+
+[tasks.test]
+description = "pytest (live tests deselected)"
+run = "uv run --locked pytest"
+
+[tasks.build]
+description = "sdist + wheel, then twine check"
+run = ["rm -rf dist", "uv build", "uv run --locked twine check dist/*"]
+
+[tasks.audit]
+description = "pip-audit over the locked dependency set"
+# `set -o pipefail` is a bash builtin; mise runs an inline script with `sh -c`,
+# which is dash on Linux and rejects it. Every multi-line task here names the
+# shell it is written for rather than relying on what /bin/sh happens to be.
+shell = "bash -c"
+# Auditing the environment would try to look guideme itself up on PyPI and, under
+# --strict, fail on not finding it. The lock file is what ships, so that is what
+# is audited: every group, pinned and hashed, with the project itself excluded.
+run = '''
+set -euo pipefail
+mkdir -p .tmp
+uv export --quiet --locked --all-groups --no-emit-project --format requirements.txt -o .tmp/requirements.txt
+uv run --locked pip-audit --strict --no-deps --requirement .tmp/requirements.txt --progress-spinner off
+'''
+
+[tasks.check]
+description = "The full gate, cheapest first"
+run = [
+  "mise run fmt-check",
+  "mise run gen-check",
+  "mise run lint",
+  "mise run types",
+  "mise run pylint",
+  "mise run test",
+  "mise run build",
+  "mise run audit",
+]
+
+[tasks.spec-check]
+description = "Fail if spec/ differs from guideme-rust main"
+shell = "bash -c"
+# spec/SOURCE is provenance -- the guideme-rust commit this copy was taken
+# from -- and has no counterpart upstream, so it is the one path excluded from
+# the content diff. Everything else must match main exactly: the contract lives
+# there, and a local edit to it is the failure this task exists to catch.
+run = '''
+set -euo pipefail
+tmp="$(mktemp -d)"
+git clone --quiet --depth 1 https://github.com/pedro-pscunha/guideme-rust "$tmp/rust"
+echo "vendored from $(cat spec/SOURCE); guideme-rust main is $(git -C "$tmp/rust" rev-parse HEAD)"
+diff -ru -x SOURCE "$tmp/rust/spec" spec
+echo "spec/ matches guideme-rust main"
+'''
+
+[tasks.hooks]
+description = "Activate the tracked git hooks in .githooks"
+shell = "bash -c"
+# Validate before configuring: a repo-local core.hooksPath replaces the global
+# one, so writing it and then failing would leave fewer gates than before.
+run = '''
+for hook in .githooks/pre-commit .githooks/pre-push; do
+  if [ ! -x "$hook" ]; then
+    echo "$hook is not executable — git would skip it; nothing was changed" >&2
+    exit 1
+  fi
+done
+prior="$(git config --local --get core.hooksPath || true)"
+git config --local core.hooksPath .githooks
+active="$(git config --get core.hooksPath)"
+if [ "$active" != ".githooks" ]; then
+  echo "core.hooksPath resolves to '$active', not .githooks — the hooks would not fire" >&2
+  if [ -n "$prior" ]; then git config --local core.hooksPath "$prior"; else git config --local --unset core.hooksPath; fi
+  exit 1
+fi
+echo "hooks active: .githooks (pre-commit, pre-push)"
+'''

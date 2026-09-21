@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Outcome",
+  "description": "What the policy concludes about one answer. Untyped: keys and indices, not Rust enums.",
+  "oneOf": [
+    {
+      "description": "Noul.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "noul"
+        }
+      },
+      "$ref": "#/$defs/Verdict",
+      "required": [
+        "kind"
+      ]
+    },
+    {
+      "description": "Choice.",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "description": "Reported confidence.",
+          "$ref": "#/$defs/Confidence"
+        },
+        "key": {
+          "description": "The API's chosen key.",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "const": "choice"
+        },
+        "ranked": {
+          "description": "Options by descending probability, ties by key.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/Probability"
+              }
+            ]
+          }
+        },
+        "unsure": {
+          "description": "`confidence < min_confidence`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "key",
+        "confidence",
+        "unsure",
+        "ranked"
+      ]
+    },
+    {
+      "description": "Score. Levels are positional: index `i` of `distribution` and `legend` is level `i`.",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "description": "Reported confidence.",
+          "$ref": "#/$defs/Confidence"
+        },
+        "distribution": {
+          "description": "Probability of each level, in level order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Probability"
+          }
+        },
+        "index": {
+          "description": "Argmax of the distribution; ties go to the lowest index.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "kind": {
+          "type": "string",
+          "const": "score"
+        },
+        "legend": {
+          "description": "Description of each level, in level order.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unsure": {
+          "description": "`confidence < min_confidence`.",
+          "type": "boolean"
+        },
+        "value": {
+          "description": "The API's expected value.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "kind",
+        "index",
+        "value",
+        "confidence",
+        "unsure",
+        "distribution",
+        "legend"
+      ]
+    }
+  ],
+  "$defs": {
+    "Confidence": {
+      "description": "confidence in the closed unit interval",
+      "type": "number",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "Probability": {
+      "description": "probability in the closed unit interval",
+      "type": "number",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "Verdict": {
+      "description": "The three-way reading of a noul answer.",
+      "oneOf": [
+        {
+          "description": "`p >= yes_above`.",
+          "type": "object",
+          "properties": {
+            "p": {
+              "$ref": "#/$defs/Probability"
+            },
+            "verdict": {
+              "type": "string",
+              "const": "yes"
+            }
+          },
+          "required": [
+            "verdict",
+            "p"
+          ]
+        },
+        {
+          "description": "`p <= no_below`.",
+          "type": "object",
+          "properties": {
+            "p": {
+              "$ref": "#/$defs/Probability"
+            },
+            "verdict": {
+              "type": "string",
+              "const": "no"
+            }
+          },
+          "required": [
+            "verdict",
+            "p"
+          ]
+        },
+        {
+          "description": "Strictly between the two.",
+          "type": "object",
+          "properties": {
+            "p": {
+              "$ref": "#/$defs/Probability"
+            },
+            "verdict": {
+              "type": "string",
+              "const": "unsure"
+            }
+          },
+          "required": [
+            "verdict",
+            "p"
+          ]
+        }
+      ]
+    }
+  }
+}

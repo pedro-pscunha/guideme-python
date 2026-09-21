@@ -1,0 +1,152 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "guideme"
+version = "0.1.0"
+description = "Type-safe inline judgments from TypeSafe Jev: a yes/no is an if, a choice is an exhaustive match, a score is a comparison."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+authors = [{ name = "Pedro Cunha" }]
+keywords = ["typesafe", "jev", "llm", "judgment", "classification", "opentelemetry"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = [
+  "httpx>=0.28.1,<0.29",
+  "pydantic>=2.13.5,<3",
+  "opentelemetry-api>=1.44.0,<2",
+]
+
+[project.urls]
+Homepage = "https://github.com/pedro-pscunha/guideme-python"
+Repository = "https://github.com/pedro-pscunha/guideme-python"
+Changelog = "https://github.com/pedro-pscunha/guideme-python/blob/main/CHANGELOG.md"
+Contract = "https://github.com/pedro-pscunha/guideme-rust/blob/main/docs/contract.md"
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "pytest-httpserver==1.1.5",
+  "hypothesis==6.168.0",
+  "opentelemetry-sdk==1.44.0",
+  "jsonschema==4.26.0",
+  "pyright==1.1.414",
+  "ruff==0.16.8",
+  "pylint==4.0.8",
+  "pip-audit==2.10.1",
+  "twine==7.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/guideme"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/guideme", "spec", "README.md", "CHANGELOG.md", "LICENSE-*", "pyproject.toml"]
+
+[tool.uv]
+required-version = ">=0.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "scripts", "examples/otlp"]
+extend-exclude = ["tests/typing/expect_errors"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "COM812",  # trailing-comma rule conflicts with the formatter; the formatter owns commas
+  "CPY001",  # the licence lives in LICENSE-MIT/LICENSE-APACHE, not in a header on every file
+  "D203",    # one-blank-line-before-class conflicts with D211; we keep D211
+  "D213",    # multi-line-summary-second-line conflicts with D212; we keep D212
+  "ISC001",  # implicit-str-concat conflicts with the formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+  "S101",    # tests assert
+  "PLR2004", # magic numbers are the fixtures
+  "D",       # test docstrings add nothing the test name does not say
+  "INP001",  # tests/typing files are pyright inputs, not a package
+]
+"scripts/**" = [
+  "T201",    # the generator prints its output
+  "INP001",  # scripts/ is a directory of programs, not an importable package
+]
+"examples/**" = [
+  "T201",    # a runnable example prints
+  "INP001",  # an example is a program, not a package
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pylint]
+max-args = 8  # builders and the ask span take many named fields
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src", "tests", "scripts", "examples/otlp"]
+exclude = ["tests/typing/expect_errors", "**/.venv", "dist"]
+reportMatchNotExhaustive = "error"
+reportImplicitOverride = "error"
+reportMissingSuperCall = "none"
+reportUnusedCallResult = "error"
+reportImportCycles = "error"
+reportPropertyTypeMismatch = "error"
+reportUninitializedInstanceVariable = "error"
+reportUnnecessaryComparison = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+enableReachabilityAnalysis = true
+
+[tool.pylint.main]
+py-version = "3.12"
+jobs = 0
+fail-under = 10
+recursive = true
+load-plugins = ["pylint.extensions.bad_builtin", "pylint.extensions.check_elif", "pylint.extensions.docparams", "pylint.extensions.mccabe", "pylint.extensions.overlapping_exceptions", "pylint.extensions.redefined_variable_type", "pylint.extensions.typing"]
+ignore-paths = ["tests/typing/expect_errors", ".*/\\.venv/.*", "dist"]
+
+[tool.pylint."messages control"]
+enable = ["all"]
+disable = [
+  "line-too-long",             # ruff E501 owns line length
+  "missing-module-docstring",  # ruff D100 owns it
+  "missing-class-docstring",   # ruff D101 owns it
+  "missing-function-docstring",  # ruff D103 owns it
+  "too-few-public-methods",    # frozen value objects have one method on purpose
+  "duplicate-code",            # the surface test restates __all__ on purpose; sharing it would make it tautological
+  "locally-disabled",          # every disable carries its reason on the line
+  "suppressed-message",        # ditto
+]
+
+[tool.pylint.basic]
+# A Choice member's name is the key that goes on the wire and a Levels member's
+# name is a level in the caller's domain. Both are named by that domain, not by
+# Python's constant convention, so the enum bodies in this package and in its
+# tests are lower case on purpose.
+class-const-naming-style = "any"
+
+[tool.pylint.design]
+max-args = 8
+max-positional-arguments = 8
+max-attributes = 10
+max-returns = 8
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q --strict-markers --strict-config -m 'not live'"
+markers = ["live: hits the real TypeSafe API; needs TYPESAFE_API_KEY and -m live"]
+xfail_strict = true
+filterwarnings = ["error"]

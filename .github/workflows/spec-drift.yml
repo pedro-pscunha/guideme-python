@@ -1,0 +1,25 @@
+name: Spec drift
+
+# spec/ is vendored from guideme-rust and is the cross-SDK contract. A change
+# lands there, not here, so nothing in this repository moves when it does. CI
+# checks it on every pull request; this catches it between them.
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spec-drift-weekly:
+    name: spec-drift (weekly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: mise run spec-check
+        run: mise run spec-check

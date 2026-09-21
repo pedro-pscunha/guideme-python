@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The repository is public and nothing here publishes, comments or deploys.
+permissions:
+  contents: read
+
+# Supersede in-flight PR runs; never cancel a run for a commit on main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Every uv invocation in this workflow resolves from the committed lock file
+  # or fails. A gate that silently re-resolves proves nothing about what ships.
+  UV_LOCKED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  # The whole gate, on the floor of the supported range and on the newest
+  # release. mise.toml owns the tool versions; nothing is re-pinned here.
+  gate:
+    name: gate (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    env:
+      UV_PYTHON: "${{ matrix.python }}"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # mise.toml is the single source of truth for uv and gitleaks. uv, not a
+      # second action, is what installs the interpreter, so the version this job
+      # runs on is decided in one place.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: Install and pin Python ${{ matrix.python }}
+        run: |
+          uv python install "${UV_PYTHON}"
+          uv python pin "${UV_PYTHON}"
+          mise run sync
+
+      # fmt-check, gen-check, ruff, pyright, pylint, pytest, build + twine,
+      # pip-audit. The live tests are deselected by addopts and nothing here
+      # passes -m live, so no API key is ever needed.
+      - name: mise run check
+        run: mise run check
+
+  # The tracked pre-commit and pre-push hooks scan for secrets, but a hook is
+  # opt-in and local. This is the copy that runs on every pull request, fork
+  # included, and on every commit that reaches main.
+  secrets:
+    name: secrets (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history: a secret on any commit is a leak, however old.
+          fetch-depth: 0
+
+      # gitleaks' version comes from mise.toml, same as the hooks use.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      # Exit 2 is a leak, exit 1 is gitleaks failing to run. Both fail the job.
+      - name: gitleaks over the full history
+        run: gitleaks git --no-banner --redact --exit-code 2
+
+  # examples/otlp is its own uv project with its own lock file, so the root
+  # gate never resolves it. --locked is the point: it fails when guideme moves
+  # under the example instead of silently resolving around it.
+  example:
+    name: example (otlp)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/otlp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: uv sync --locked
+        run: uv sync --locked
+
+      - name: ruff format --check
+        run: uv run --locked ruff format --check .
+
+      - name: ruff check
+        run: uv run --locked ruff check .
+
+      - name: pyright
+        run: uv run --locked pyright
+
+  # requires-python claims >= 3.12, so 3.12.0 is what has to run. The assert
+  # is there because UV_PYTHON is easy to lose: a job that quietly ran 3.12.13
+  # would prove nothing about the floor.
+  min-python:
+    name: min-python (3.12.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON: "3.12.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: Install and pin Python 3.12.0
+        run: |
+          uv python install 3.12.0
+          uv python pin 3.12.0
+          uv sync --locked --all-groups
+
+      - name: Assert the floor and run the suite on it
+        run: |
+          uv run --locked python -c "import sys; assert sys.version_info[:3] == (3, 12, 0), sys.version"
+          uv run --locked pytest
+
+  # spec/ is vendored from guideme-rust. This is the check the main ruleset
+  # requires; advisories.yml re-runs it weekly so drift is caught between PRs.
+  spec-drift:
+    name: spec-drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: mise run spec-check
+        run: mise run spec-check
