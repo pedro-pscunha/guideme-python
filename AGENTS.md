@@ -44,6 +44,9 @@ imports `errors` and `policy`; `api` imports `question` and below; `api.client` 
 and `telemetry`. Nothing inside the package writes `from guideme import ...`: that would
 import the package's own `__init__`, which imports the executors, which import `api`.
 
+`docs/design.md` records the decisions and the sharp edges. Update it when a decision changes.
+`docs/contract.md` says where the cross-SDK contract lives and how drift from it is caught.
+
 ## Invariants
 
 These hold everywhere in `src/guideme`. `ruff`, `pyright` and `pylint` enforce most of them;
