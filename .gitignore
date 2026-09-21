@@ -1,0 +1,8 @@
+/.tmp
+.venv/
+dist/
+__pycache__/
+*.pyc
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
