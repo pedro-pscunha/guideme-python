@@ -12,6 +12,7 @@ from guideme.errors import (
     UnexpectedStatusError,
     UnsureError,
 )
+from guideme.policy import Policy, Thresholds, Verdict
 from guideme.scalars import ApiKey, Confidence, Model, Probability
 
 __all__ = [
@@ -23,10 +24,13 @@ __all__ = [
     "InvalidError",
     "Model",
     "OverloadedError",
+    "Policy",
     "Probability",
     "ProtocolError",
     "RateLimitedError",
+    "Thresholds",
     "TransportError",
     "UnexpectedStatusError",
     "UnsureError",
+    "Verdict",
 ]
