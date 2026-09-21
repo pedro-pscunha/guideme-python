@@ -51,12 +51,14 @@ changes to it.
 - `ApiKey`, which carries the key and never prints it: `repr` and `str` are both `ApiKey(***)`,
   it has no serialisation and refuses to pickle, and it is scrubbed from anything the package
   reports.
-  `Probability`, `Confidence`, `Key`, `Rank` and `Model` are the other validated scalars.
-- `guideme.api`, `guideme.policy` and `guideme.question` as a second supported tier: the wire
-  mirror of `POST /v1/systemone` and `GET /v1/models`, with `Client` and `AsyncClient` in
-  `guideme.api.client`; `guideme.policy.resolve` as the pure decision function; and
-  `guideme.question.Question`, the type every question constructor returns, for annotating a
-  question you store or pass on.
+  `Model` is validated on construction; `Probability`, `Confidence`, `Key` and `Rank` are
+  `NewType` brands that the wire mints and validates, so the guarantee is where they come
+  from rather than a check at every call.
+- A second supported tier, imported by its own path: `guideme.api`, the wire mirror of
+  `POST /v1/systemone` and `GET /v1/models`, with `Client` and `AsyncClient` in
+  `guideme.api.client`; `guideme.policy`, holding `resolve`, the pure decision function; and
+  the single name `guideme.question.Question`, the type every question constructor returns,
+  for annotating a question you store or pass on. The rest of `guideme.question` is private.
 - `GuideBuilder.from_env()` applies `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` and
   `GUIDEME_MODEL` onto a builder, so a setting with no environment variable can be chained
   after them; `Guide.from_env()` and `AsyncGuide.from_env()` are that step plus `build()`.

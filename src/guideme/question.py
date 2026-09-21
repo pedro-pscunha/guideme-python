@@ -429,8 +429,9 @@ def choose_among(instructions: Json, options: Mapping[str, str | None]) -> Choic
     """Pick one of the runtime options `(key, rubric)`. Plain output: `Key`.
 
     Takes 1 to 255 options, the same range a `Choice` enum takes. A rubric
-    outside it, or one where two keys collide, is a `ConfigError` raised here,
-    where the options are written, never later at `ask`.
+    outside it is a `ConfigError` raised here, where the options are written,
+    never later at `ask`. Keys cannot collide: a `Mapping` has already made
+    them unique.
     """
     return _choice(
         instructions,

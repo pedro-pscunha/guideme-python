@@ -338,10 +338,11 @@ class SyncAskOverloads(ABC):
             The answers, in the shape of `shape`.
 
         Raises:
-            ConfigError: `shape` holds something that is not a question, the batch is
-                empty, or `state` or the instructions cannot be serialised to JSON. A
-                rubric this call could not ask is refused where the question is built,
-                not here.
+            ConfigError: `shape` holds something that is not a question, a question's
+                own thresholds are outside `0..=1` or leave `no_below` above
+                `yes_above`, the batch is empty, or `state` or the instructions cannot
+                be serialised to JSON. A rubric this call could not ask is refused
+                where the question is built, not here.
             UnsureError: the policy read an answer as unsure and neither
                 `.otherwise(...)` nor a `fallback(...)` member caught it.
             ProtocolError: the response breaks the contract: an undecodable body, the
@@ -680,10 +681,11 @@ class AsyncAskOverloads(ABC):
             The answers, in the shape of `shape`.
 
         Raises:
-            ConfigError: `shape` holds something that is not a question, the batch is
-                empty, or `state` or the instructions cannot be serialised to JSON. A
-                rubric this call could not ask is refused where the question is built,
-                not here.
+            ConfigError: `shape` holds something that is not a question, a question's
+                own thresholds are outside `0..=1` or leave `no_below` above
+                `yes_above`, the batch is empty, or `state` or the instructions cannot
+                be serialised to JSON. A rubric this call could not ask is refused
+                where the question is built, not here.
             UnsureError: the policy read an answer as unsure and neither
                 `.otherwise(...)` nor a `fallback(...)` member caught it.
             ProtocolError: the response breaks the contract: an undecodable body, the

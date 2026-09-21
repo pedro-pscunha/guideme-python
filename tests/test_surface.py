@@ -1,4 +1,5 @@
 import ast
+import re
 from pathlib import Path
 
 import guideme
@@ -67,8 +68,14 @@ def test_public_surface_is_exactly_the_documented_list() -> None:
     assert set(guideme.__all__) == DOCUMENTED
     assert list(guideme.__all__) == sorted(guideme.__all__)
     assert all(hasattr(guideme, name) for name in guideme.__all__)
+    # Inside code, not bare prose: `Thresholds` passed this check for a release while
+    # appearing only as the English word starting a sentence, which documents nothing. A
+    # name may sit inside a wider span, as `ModelInfo` does in `tuple[ModelInfo, ...]`,
+    # so the test looks in every fenced block and every inline span rather than for the
+    # name alone between backticks.
     prose = README.read_text(encoding="utf-8")
-    assert not [name for name in guideme.__all__ if name not in prose]
+    code = "\n".join(re.findall(r"`{1,3}[^`]+`{1,3}", prose, re.DOTALL))
+    assert not [name for name in guideme.__all__ if name not in code]
 
 
 def test_httpx_and_pydantic_stay_behind_the_api_package() -> None:

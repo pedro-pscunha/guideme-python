@@ -9,12 +9,15 @@ A Python package that makes a TypeSafe Jev judgment usable as control flow: a ye
 published to PyPI under `MIT OR Apache-2.0`. The public surface has two tiers:
 
 - the 33 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
-- `guideme.api`, `guideme.policy` and `guideme.question`, imported by their own path and not
-  re-exported at the top level. `guideme.api` is the wire mirror and `guideme.api.client`
-  holds `Client` and `AsyncClient`; `guideme.policy` holds `resolve`; `guideme.question`
-  holds `Question`, which is what every constructor in the first tier returns and the only
-  way to write the type of a stored question down. The README's **Lower layers** section is
-  where all three are documented for callers.
+- `guideme.api` and `guideme.policy` as whole modules, imported by their own path and not
+  re-exported at the top level: `guideme.api` is the wire mirror and `guideme.api.client`
+  holds `Client` and `AsyncClient`, and `guideme.policy` holds `resolve`.
+- one name from a third module, `guideme.question.Question`: what every constructor in the
+  first tier returns, and the only way to write the type of a stored question down. The
+  promise covers that name and nothing else in `guideme.question` — `validate`, `Spec` and
+  the concrete question classes stay private, because a tier is a promise and this is the
+  narrowest one that lets a caller annotate. The README's **Lower layers** section documents
+  all of it.
 
 Everything else in the package is private, whatever its name looks like.
 

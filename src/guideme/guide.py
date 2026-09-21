@@ -215,7 +215,20 @@ class Guide(SyncAskOverloads):
         return Guide(self._client, _merged(self._config, policy))
 
     def models(self) -> tuple[ModelInfo, ...]:
-        """The models this account may use. No ask span of its own."""
+        """The models this account may use. No ask span of its own.
+
+        One `GET /v1/models`, never retried: unlike `ask`, a `429` or a `529` raises on the
+        first attempt rather than after a backoff.
+
+        Raises:
+            AuthError: the key was missing or rejected.
+            InvalidError: the API rejected the request (`422`).
+            RateLimitedError: the API answered `429`.
+            OverloadedError: the API answered `529`.
+            TransportError: the request never completed.
+            UnexpectedStatusError: any other status.
+            ProtocolError: the body did not match the contract.
+        """
         return _described(self._client.models())
 
     def close(self) -> None:
@@ -266,7 +279,20 @@ class AsyncGuide(AsyncAskOverloads):
         return AsyncGuide(self._client, _merged(self._config, policy))
 
     async def models(self) -> tuple[ModelInfo, ...]:
-        """The models this account may use. No ask span of its own."""
+        """The models this account may use. No ask span of its own.
+
+        One `GET /v1/models`, never retried: unlike `ask`, a `429` or a `529` raises on the
+        first attempt rather than after a backoff.
+
+        Raises:
+            AuthError: the key was missing or rejected.
+            InvalidError: the API rejected the request (`422`).
+            RateLimitedError: the API answered `429`.
+            OverloadedError: the API answered `529`.
+            TransportError: the request never completed.
+            UnexpectedStatusError: any other status.
+            ProtocolError: the body did not match the contract.
+        """
         return _described(await self._client.models())
 
     async def close(self) -> None:

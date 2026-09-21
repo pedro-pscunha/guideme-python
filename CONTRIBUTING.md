@@ -1,8 +1,9 @@
 # Contributing
 
 guideme makes a TypeSafe Jev judgment usable as Python control flow. It is one distribution,
-`guideme`. Its public surface is what `src/guideme/__init__.py` exports, plus `guideme.api`
-and `guideme.policy` as a second supported tier that callers import by their own path.
+`guideme`. Its public surface is what `src/guideme/__init__.py` exports, plus a second
+supported tier that callers import by their own path: the modules `guideme.api` and
+`guideme.policy`, and the single name `guideme.question.Question`.
 Everything else in the package is private. `AGENTS.md` and the README's **Lower layers**
 section say what each tier promises.
 

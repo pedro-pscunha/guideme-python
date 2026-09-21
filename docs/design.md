@@ -102,8 +102,10 @@ Each module survives the test.
   span exporter to store each one once. There is no subscriber here, so the library makes both
   calls and `events(...)` is the filter the application would otherwise have written. `both` is
   the default because a record costs nothing until a `LoggerProvider` exists, which keeps the
-  library's unconfigured behaviour the same as Rust's. The mode rides on `_Config`, so a
-  `with_policy` copy keeps it and `Guide` and `AsyncGuide` cannot differ.
+  library's unconfigured behaviour the same as Rust's. The mode rides on the client, which is
+  what emits the retries, and the guide reads `client.events` back for the answers, so it has
+  one owner. A `with_policy` copy shares the client and therefore the mode, and `Guide` and
+  `AsyncGuide` cannot differ.
 
 ## Sharp edges
 
@@ -135,9 +137,11 @@ Each module survives the test.
   original or the copy closes the connection pool for both.
 - **`Question` is supported, and not in `__all__`.** The top-level surface is a fixed list and
   a question's type is whatever its constructor returns, so callers annotate by inference.
-  `guideme.question` is the second tier, beside `guideme.api` and `guideme.policy`, and
-  carries the same promise: import `Question` from there when you need to write the type of a
-  stored question down.
+  `guideme.question.Question` is in the second tier, beside `guideme.api` and
+  `guideme.policy`, and carries the same promise: import it from there when you need to write
+  the type of a stored question down. The promise is that one name. The rest of the module,
+  `validate`, `Spec` and the concrete question classes, is private, because naming the whole
+  module would publish all of it to let a caller annotate one thing.
 - **Two `Question`s.** `guideme.question.Question` is the user-facing value;
   `guideme.api`'s question model is the wire shape it becomes.
 - **State is JSON-shaped.** Anything `json.dumps` accepts without a default hook. A dataclass
