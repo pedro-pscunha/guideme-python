@@ -1,0 +1,67 @@
+name: Release
+
+# A tag is the only trigger. Pushing v1.2.3 publishes 1.2.3 to PyPI, so the tag
+# goes on a commit whose gate is already green, and the tag ruleset refuses to
+# let it move afterwards.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  UV_LOCKED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  # Build in a job with no id-token and no environment, so the artifact is made
+  # where nothing can publish it. The gate runs again here because CI green on
+  # main proves the branch, not the tag.
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: mise run sync
+        run: mise run sync
+
+      - name: mise run check
+        run: mise run check
+
+      # The gate's build task already produced these and ran twine check over
+      # them. Building again from an explicit step keeps what is uploaded from
+      # depending on what the gate happens to leave behind.
+      - name: uv build
+        run: uv build
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # Trusted publishing: PyPI trades this job's OIDC token for a short-lived
+  # upload token, so the repository holds no PyPI credential of any kind. PyPI
+  # checks the owner, the repository, this workflow's file name and the
+  # environment, so all four are part of the contract; AGENTS.md has the values.
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

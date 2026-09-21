@@ -83,10 +83,14 @@ def triage(ticket: Json) -> None:
         ),
         ticket,
     )
+    # pyright infers tuple[bool, Department, Scored[Frustration], dict[str, bool]]
     _ = assert_type(urgent, bool)
     _ = assert_type(dept, Department)
     _ = assert_type(mood, Scored[Frustration])
     _ = assert_type(flags, dict[str, bool])
+
+    if urgent or mood.value > 1.5 or flags["vip"]:
+        prioritise()
 
     guide.close()
 

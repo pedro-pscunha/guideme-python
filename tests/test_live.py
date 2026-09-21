@@ -52,7 +52,6 @@ def documented_batch() -> tuple[
     overload asks for the latter. Written inline, as the README writes it, the literal
     infers the right type on its own.
     """
-    # pylint: disable=no-member  # the fluent chain returns Self off a mixin; pyright follows it
     return (
         noul("Is this urgent?").yes_above(0.7).no_below(0.3).otherwise(False),
         choose(Department, "Which team should handle this?").min_confidence(0.6),
