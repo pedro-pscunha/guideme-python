@@ -78,6 +78,7 @@ ignore = [
   "PLR2004", # magic numbers are the fixtures
   "D",       # test docstrings add nothing the test name does not say
   "INP001",  # tests/typing files are pyright inputs, not a package
+  "FBT003",  # record_state(True) and .otherwise(False) are the documented surface
 ]
 "scripts/**" = [
   "T201",    # the generator prints its output

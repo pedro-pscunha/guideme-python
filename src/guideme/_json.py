@@ -6,11 +6,19 @@ represented fails at the boundary instead of somewhere inside the request.
 """
 
 import json
+from collections.abc import Mapping, Sequence
 
 from guideme.errors import ConfigError
 
-type Json = str | int | float | bool | list[Json] | dict[str, Json] | None
-"""Anything `json.dumps` accepts without a default hook. The caller's data, never ours."""
+type Json = str | int | float | bool | Sequence[Json] | Mapping[str, Json] | None
+"""Anything `json.dumps` accepts without a default hook. The caller's data, never ours.
+
+`Sequence` and `Mapping` rather than `list` and `dict` because those two are invariant
+in their parameters: a caller holding an ordinary `dict[str, str]` could not pass it
+where a `dict[str, Json]` was wanted, which is the shape most state actually has. What
+that admits and `json.dumps` refuses, a `bytes` or a mapping of its own, fails here as a
+`ConfigError` before anything is sent.
+"""
 
 
 def dumps(value: Json, what: str) -> str:
