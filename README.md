@@ -179,9 +179,10 @@ the synchronous guide and `.build_async()` the asynchronous one.
 
 ## Observability
 
-guideme emits OpenTelemetry spans and events through `opentelemetry-api` and installs nothing:
-no tracer provider, no exporter, no logging handler. Install a provider and the spans appear.
-The smallest one that leaves the process:
+guideme emits OpenTelemetry spans, span events and OTLP log records through
+`opentelemetry-api` and installs nothing: no tracer provider, no logger provider, no exporter,
+no logging handler. Install a provider and the data appears. The smallest one that leaves the
+process:
 
 ```python
 from opentelemetry import trace
@@ -202,6 +203,12 @@ event when an attempt is throttled. One `guideme.answer` event per question with
 the probability or confidence, the unsure verdict and the settled thresholds that produced it.
 The state is never recorded unless you opt in with `record_state(True)`. The API key never
 appears anywhere.
+
+Every answer and every retry is also an OTLP log record, at `INFO` and at `WARN`, carrying the
+trace id and the span id of the span it came from, so a logs backend links one straight back to
+the decision it explains. Install a `LoggerProvider` too and they arrive; install neither and
+they cost nothing. `events("span")` or `events("log")` on the builder picks one signal when you
+export both and would rather store each event once.
 
 Because the shapes are standard, any OTLP backend reads them as is.
 [`docs/observability.md`](docs/observability.md) has the field tables and the environment

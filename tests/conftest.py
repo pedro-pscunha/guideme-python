@@ -13,6 +13,9 @@ import pytest
 from hypothesis import HealthCheck, settings
 from jsonschema import Draft202012Validator
 from opentelemetry import trace
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.sdk._logs import LoggerProvider, ReadableLogRecord
+from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
 from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -432,6 +435,40 @@ def attributes(carrier: ReadableSpan | Event) -> dict[str, object]:
     return dict(carrier.attributes or {})
 
 
+def log_attributes(record: ReadableLogRecord) -> dict[str, object]:
+    """One log record's attributes as a plain dict, comparable with a span event's."""
+    return dict(record.log_record.attributes or {})
+
+
+def log_scope(record: ReadableLogRecord) -> str:
+    """The instrumentation scope one record came from: `guideme` or `guideme.api`."""
+    scope = record.instrumentation_scope
+    assert scope is not None
+    return scope.name
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class Logged:
+    """What one test emitted on the logs signal, queried by event name."""
+
+    exporter: InMemoryLogRecordExporter
+
+    def all(self) -> tuple[ReadableLogRecord, ...]:
+        """Every record emitted during this test, in the order they were emitted."""
+        return self.exporter.get_finished_logs()
+
+    def named(self, event_name: str) -> list[ReadableLogRecord]:
+        """Every record carrying this event name."""
+        return [record for record in self.all() if record.log_record.event_name == event_name]
+
+    def one(self, event_name: str) -> ReadableLogRecord:
+        """The single record with this event name, or a failure naming what was there instead."""
+        found = self.named(event_name)
+        assert len(found) == 1, [record.log_record.event_name for record in self.all()]
+        return found[0]
+
+
 @pytest.fixture(scope="session")
 def exporter() -> InMemorySpanExporter:
     """The one tracer provider this process installs. OpenTelemetry allows exactly one."""
@@ -448,3 +485,26 @@ def spans(exporter: InMemorySpanExporter) -> Iterator[Recorded]:
     exporter.clear()
     yield Recorded(exporter)
     exporter.clear()
+
+
+@pytest.fixture(scope="session")
+def log_exporter() -> InMemoryLogRecordExporter:
+    """The one logger provider this process installs. OpenTelemetry allows exactly one.
+
+    guideme resolves its loggers at import, before this runs, so what this proves along the
+    way is that the proxy picks the provider up afterwards, exactly as an application that
+    configures OpenTelemetry after importing the library would.
+    """
+    collected = InMemoryLogRecordExporter()
+    provider = LoggerProvider()
+    provider.add_log_record_processor(SimpleLogRecordProcessor(collected))
+    set_logger_provider(provider)
+    return collected
+
+
+@pytest.fixture
+def records(log_exporter: InMemoryLogRecordExporter) -> Iterator[Logged]:
+    """What one test emitted on the logs signal, with earlier tests' records cleared away."""
+    log_exporter.clear()
+    yield Logged(log_exporter)
+    log_exporter.clear()

@@ -1,17 +1,22 @@
-"""Spans and events over `opentelemetry-api`. This module installs nothing.
+"""Spans, events and OTLP log records over `opentelemetry-api`. This module installs nothing.
 
-No tracer provider, no exporter, no logging handler: until the application installs a
-provider every call here goes to OpenTelemetry's no-op implementation. What the names
-mean is `docs/observability.md`, and they are part of the cross-SDK contract.
+No tracer provider, no logger provider, no exporter, no logging handler: until the
+application installs a provider every call here goes to OpenTelemetry's no-op
+implementation. What the names mean is `docs/observability.md`, and they are part of the
+cross-SDK contract.
 
 Two scopes, matching the two the Rust SDK filters on: `guideme` carries the ask span and
-the answer events, `guideme.api` the HTTP spans and the retry events.
+the answers, `guideme.api` the HTTP spans and the retries. An answer or a retry is written
+to the span, to a log record, or to both, as `Events` says. A record emitted inside the
+active span carries that span's trace and span ids, and that is what links the two signals.
 """
 
 from contextlib import AbstractContextManager
 from datetime import timedelta
 from importlib.metadata import PackageNotFoundError, version
+from typing import Literal
 
+from opentelemetry._logs import Logger, LogRecord, SeverityNumber, get_logger
 from opentelemetry.trace import Span, SpanKind, StatusCode, get_tracer
 
 from guideme.errors import GuidemeError
@@ -40,6 +45,19 @@ ANSWER_EVENT = "guideme.answer"
 RETRY_EVENT = "guideme.retry"
 """One per throttled attempt, just before the wait. The warning of the Rust SDK."""
 
+type Events = Literal["span", "log", "both"]
+"""Where an answer or a retry is written: the span, an OTLP log record, or both.
+
+`both` by default. With no logger provider installed the record goes to OpenTelemetry's
+no-op logger, so `both` costs a traces-only application nothing and reproduces what the
+Rust SDK emits unfiltered. An application running a traces pipeline and a logs pipeline
+sets `span` or `log` to store each event once, which is what Rust's
+`filter_fn(|meta| meta.is_span())` does there.
+"""
+
+EVENT_MODES: frozenset[str] = frozenset({"span", "log", "both"})
+"""Every value `Events` allows, for the builder to refuse anything else by."""
+
 _MILLISECOND = timedelta(milliseconds=1)
 
 
@@ -59,6 +77,35 @@ def _installed_version() -> str | None:
 _VERSION = _installed_version()
 _tracer = get_tracer("guideme", _VERSION)
 _api_tracer = get_tracer("guideme.api", _VERSION)
+# `get_logger` takes the version as a string, where `get_tracer` takes an optional one.
+_logger = get_logger("guideme", _VERSION or "")
+_api_logger = get_logger("guideme.api", _VERSION or "")
+
+
+def _record(
+    logger: Logger,
+    name: str,
+    severity: SeverityNumber,
+    body: str,
+    attributes: dict[str, Attribute],
+) -> None:
+    """Emit one OTLP log record, carrying the same attributes as the matching span event.
+
+    Called from inside the span the event belongs to, which is where the record's trace and
+    span ids come from: OpenTelemetry reads them off the active context when the record is
+    built. The text is the severity's own name, so the two cannot drift. `INFO` for an
+    answer and `WARN` for a retry are the only severities guideme uses; nothing is ever
+    emitted at `ERROR`.
+    """
+    logger.emit(
+        LogRecord(
+            event_name=name,
+            severity_text=severity.name,
+            severity_number=severity,
+            body=body,
+            attributes=attributes,
+        )
+    )
 
 
 def ask_span(
@@ -96,11 +143,15 @@ def record_response(span: Span, model: str, input_tokens: int, output_tokens: in
     span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
 
 
-def answer_event(span: Span, qid: str, outcome: Outcome, thresholds: Thresholds) -> None:
-    """One `guideme.answer` event, with the thresholds the verdict came from.
+def answer_event(
+    span: Span, qid: str, outcome: Outcome, thresholds: Thresholds, events: Events
+) -> None:
+    """One `guideme.answer`, with the thresholds the verdict came from.
 
     Emitted from the resolved outcome, before the unsure ladder picks a fallback, so it
-    says what the model answered rather than what the caller ended up with.
+    says what the model answered rather than what the caller ended up with. The span event
+    and the log record carry the same attributes; the record adds the message the Rust SDK
+    writes, at `INFO`.
     """
     match outcome:
         case NoulOutcome(verdict=verdict):
@@ -110,6 +161,7 @@ def answer_event(span: Span, qid: str, outcome: Outcome, thresholds: Thresholds)
                 "guideme.probability": verdict.p,
                 "guideme.unsure": verdict.verdict == "unsure",
             }
+            body = f"{qid} noul: {verdict.verdict}"
         case ChoiceOutcome(key=key, confidence=reported, unsure=unsure):
             judged = {
                 "guideme.kind": "choice",
@@ -117,6 +169,7 @@ def answer_event(span: Span, qid: str, outcome: Outcome, thresholds: Thresholds)
                 "guideme.confidence": reported,
                 "guideme.unsure": unsure,
             }
+            body = f"{qid} choice: {key}"
         case ScoreOutcome(index=index, value=value, confidence=reported, unsure=unsure):
             judged = {
                 "guideme.kind": "score",
@@ -125,16 +178,18 @@ def answer_event(span: Span, qid: str, outcome: Outcome, thresholds: Thresholds)
                 "guideme.confidence": reported,
                 "guideme.unsure": unsure,
             }
-    span.add_event(
-        ANSWER_EVENT,
-        {
-            "guideme.question": qid,
-            **judged,
-            "guideme.yes_above": thresholds.yes_above,
-            "guideme.no_below": thresholds.no_below,
-            "guideme.min_confidence": thresholds.min_confidence,
-        },
-    )
+            body = f"{qid} score: level {index}"
+    attributes: dict[str, Attribute] = {
+        "guideme.question": qid,
+        **judged,
+        "guideme.yes_above": thresholds.yes_above,
+        "guideme.no_below": thresholds.no_below,
+        "guideme.min_confidence": thresholds.min_confidence,
+    }
+    if events != "log":
+        span.add_event(ANSWER_EVENT, attributes)
+    if events != "span":
+        _record(_logger, ANSWER_EVENT, SeverityNumber.INFO, body, attributes)
 
 
 def fail_ask(span: Span, error: GuidemeError) -> None:
@@ -188,13 +243,20 @@ def fail_attempt(span: Span, error_type: str) -> None:
     span.set_status(StatusCode.ERROR)
 
 
-def retry_event(span: Span, status: int, attempt: int, delay: timedelta) -> None:
-    """One `guideme.retry` event. `attempt` is the ordinal of the resend about to be made."""
-    span.add_event(
-        RETRY_EVENT,
-        {
-            "http.response.status_code": status,
-            "guideme.retry.attempt": attempt,
-            "guideme.retry.delay_ms": delay // _MILLISECOND,
-        },
-    )
+def retry_event(span: Span, status: int, attempt: int, delay: timedelta, events: Events) -> None:
+    """One `guideme.retry`. `attempt` is the ordinal of the resend about to be made.
+
+    The log record is the `WARN` the Rust SDK logs; a span event carries no severity, so
+    on the span its presence is the signal.
+    """
+    delay_ms = delay // _MILLISECOND
+    attributes: dict[str, Attribute] = {
+        "http.response.status_code": status,
+        "guideme.retry.attempt": attempt,
+        "guideme.retry.delay_ms": delay_ms,
+    }
+    if events != "log":
+        span.add_event(RETRY_EVENT, attributes)
+    if events != "span":
+        body = f"{status} from TypeSafe, retrying in {delay_ms} ms"
+        _record(_api_logger, RETRY_EVENT, SeverityNumber.WARN, body, attributes)

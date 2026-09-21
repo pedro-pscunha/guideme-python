@@ -31,7 +31,14 @@ from guideme.ask import Claim, Plan, decode, encode
 from guideme.errors import ConfigError, GuidemeError, ProtocolError
 from guideme.policy import Outcome, Policy, Thresholds, resolve
 from guideme.scalars import ApiKey, Model
-from guideme.telemetry import answer_event, ask_span, fail_ask, record_response
+from guideme.telemetry import (
+    EVENT_MODES,
+    Events,
+    answer_event,
+    ask_span,
+    fail_ask,
+    record_response,
+)
 
 KEY_VAR = "TYPESAFE_API_KEY"
 """Where `from_env` reads the key. Required; nothing else stands in for it."""
@@ -75,6 +82,7 @@ class _Config:
     model: Model
     policy: Policy
     record_state: bool
+    events: Events
 
 
 @final
@@ -133,7 +141,7 @@ def _open(prepared: _Prepared, config: _Config, endpoint: Endpoint) -> AbstractC
     )
 
 
-def _finish(span: Span, prepared: _Prepared, response: Response) -> object:
+def _finish(span: Span, prepared: _Prepared, response: Response, events: Events) -> object:
     """Read one response back into the shape the caller handed in.
 
     One event per question, emitted from the resolved outcome in encounter order, before
@@ -147,7 +155,7 @@ def _finish(span: Span, prepared: _Prepared, response: Response) -> object:
             detail = f"no answer for question {qid}"
             raise ProtocolError(detail)
         outcome = resolve(answer_from_wire(answer), thresholds)
-        answer_event(span, qid, outcome, thresholds)
+        answer_event(span, qid, outcome, thresholds, events)
         reply[qid] = (outcome, thresholds)
     return decode(prepared.claim, reply)
 
@@ -234,7 +242,7 @@ class Guide(SyncAskOverloads):
         with _open(prepared, self._config, self._client.endpoint) as span:
             try:
                 response = self._client.evaluate(prepared.request)
-                decoded = _finish(span, prepared, response)
+                decoded = _finish(span, prepared, response, self._config.events)
             except GuidemeError as error:
                 fail_ask(span, error)
                 raise
@@ -289,7 +297,7 @@ class AsyncGuide(AsyncAskOverloads):
         with _open(prepared, self._config, self._client.endpoint) as span:
             try:
                 response = await self._client.evaluate(prepared.request)
-                decoded = _finish(span, prepared, response)
+                decoded = _finish(span, prepared, response, self._config.events)
             except GuidemeError as error:
                 fail_ask(span, error)
                 raise
@@ -301,7 +309,11 @@ class GuideBuilder:
     """Configures a `Guide` or an `AsyncGuide`. Every setter returns the builder."""
 
     def __init__(self) -> None:
-        """Start from the defaults: the public API, `jev-latest`, 3 retries, a 30 s timeout."""
+        """Start from the defaults: the public API, `jev-latest`, 3 retries, a 30 s timeout.
+
+        Answers and retries go to both signals, because a log record costs nothing until
+        the application installs a logger provider.
+        """
         self._api_key: ApiKey | None = None
         self._base_url: str = DEFAULT_BASE_URL
         self._model: Model = Model.latest()
@@ -309,6 +321,7 @@ class GuideBuilder:
         self._retry: RetryPolicy = RetryPolicy()
         self._timeout: timedelta = DEFAULT_TIMEOUT
         self._record_state: bool = False
+        self._events: Events = "both"
 
     def api_key(self, key: ApiKey) -> Self:
         """The API key. Required unless the guide is built by `from_env`."""
@@ -353,6 +366,21 @@ class GuideBuilder:
         self._timeout = per_attempt
         return self
 
+    def events(self, where: Events) -> Self:
+        """Where an answer and a retry are written: `"span"`, `"log"` or `"both"`.
+
+        `"both"` by default, which is what the Rust SDK emits before its subscriber
+        filters anything, and which costs a traces-only application nothing: with no
+        logger provider installed the record goes to OpenTelemetry's no-op logger. An
+        application exporting traces and logs to the same backend sets `"span"` or
+        `"log"` so each event is stored once.
+        """
+        if where not in EVENT_MODES:
+            detail = f"events {where!r} is not one of {', '.join(sorted(EVENT_MODES))}"
+            raise ConfigError(detail)
+        self._events = where
+        return self
+
     def record_state(self, on: bool) -> Self:  # noqa: FBT001 -- record_state(True) is the surface
         """Record the state JSON on the ask span. Off by default: the state is user data."""
         self._record_state = on
@@ -361,12 +389,13 @@ class GuideBuilder:
     def build(self) -> Guide:
         """Build a synchronous guide, validating the policy and the origin now."""
         key, endpoint, config = self._settle()
-        return Guide(Client(key, endpoint, self._retry, self._timeout), config)
+        return Guide(Client(key, endpoint, self._retry, self._timeout, config.events), config)
 
     def build_async(self) -> AsyncGuide:
         """Build an asyncio guide, validating the policy and the origin now."""
         key, endpoint, config = self._settle()
-        return AsyncGuide(AsyncClient(key, endpoint, self._retry, self._timeout), config)
+        client = AsyncClient(key, endpoint, self._retry, self._timeout, config.events)
+        return AsyncGuide(client, config)
 
     def _settle(self) -> tuple[ApiKey, Endpoint, _Config]:
         """Everything both builds need, with every check done before a socket is opened."""
@@ -377,5 +406,10 @@ class GuideBuilder:
         return (
             self._api_key,
             Endpoint.parse(self._base_url),
-            _Config(model=self._model, policy=self._policy, record_state=self._record_state),
+            _Config(
+                model=self._model,
+                policy=self._policy,
+                record_state=self._record_state,
+                events=self._events,
+            ),
         )

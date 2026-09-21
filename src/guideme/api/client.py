@@ -34,7 +34,7 @@ from guideme.errors import (
     UnexpectedStatusError,
 )
 from guideme.scalars import ApiKey
-from guideme.telemetry import attempt_span, fail_attempt, record_status, retry_event
+from guideme.telemetry import Events, attempt_span, fail_attempt, record_status, retry_event
 
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
 """Where requests go unless the caller says otherwise."""
@@ -262,12 +262,18 @@ class Client:
     """A synchronous client for the TypeSafe HTTP API. `Guide` builds one for you."""
 
     def __init__(
-        self, api_key: ApiKey, endpoint: Endpoint, retry: RetryPolicy, timeout: timedelta
+        self,
+        api_key: ApiKey,
+        endpoint: Endpoint,
+        retry: RetryPolicy,
+        timeout: timedelta,
+        events: Events,
     ) -> None:
         """Open the connection pool. The key is held as an `ApiKey`, never as a header."""
         self.endpoint = endpoint
         self._retry = retry
         self._api_key = api_key
+        self._events: Events = events
         self._http = httpx.Client(timeout=timeout.total_seconds(), follow_redirects=True)
 
     def evaluate(self, request: Request) -> Response:
@@ -295,7 +301,7 @@ class Client:
                         return outcome
                     case Retry(delay=delay):
                         fail_attempt(span, str(response.status_code))
-                        retry_event(span, response.status_code, attempt + 1, delay)
+                        retry_event(span, response.status_code, attempt + 1, delay, self._events)
                         time.sleep(delay.total_seconds())
                     case GuidemeError():
                         fail_attempt(span, _attempt_error(response.status_code, outcome))
@@ -326,12 +332,18 @@ class AsyncClient:
     """The same client for `asyncio`. `AsyncGuide` builds one for you."""
 
     def __init__(
-        self, api_key: ApiKey, endpoint: Endpoint, retry: RetryPolicy, timeout: timedelta
+        self,
+        api_key: ApiKey,
+        endpoint: Endpoint,
+        retry: RetryPolicy,
+        timeout: timedelta,
+        events: Events,
     ) -> None:
         """Open the connection pool. The key is held as an `ApiKey`, never as a header."""
         self.endpoint = endpoint
         self._retry = retry
         self._api_key = api_key
+        self._events: Events = events
         self._http = httpx.AsyncClient(timeout=timeout.total_seconds(), follow_redirects=True)
 
     async def evaluate(self, request: Request) -> Response:
@@ -361,7 +373,7 @@ class AsyncClient:
                         return outcome
                     case Retry(delay=delay):
                         fail_attempt(span, str(response.status_code))
-                        retry_event(span, response.status_code, attempt + 1, delay)
+                        retry_event(span, response.status_code, attempt + 1, delay, self._events)
                         await asyncio.sleep(delay.total_seconds())
                     case GuidemeError():
                         fail_attempt(span, _attempt_error(response.status_code, outcome))

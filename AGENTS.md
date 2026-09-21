@@ -30,7 +30,7 @@ and `spec/` pins it. The live TypeSafe docs are the source of truth for the wire
 | `src/guideme/question.py` | question kinds, constructors, `Ranked`, `Scored`, the unsure ladder | a question is inert until asked; the reader travels with it |
 | `src/guideme/ask.py` | shapes: `encode`, `decode`, `Plan` | ids are `q0..qN` in encounter order, insertion order for a dict |
 | `src/guideme/_ask_overloads.py` | the typed `ask` surfaces | GENERATED; edit `scripts/gen_ask_overloads.py` and run `mise run gen` |
-| `src/guideme/telemetry.py` | every span, event and attribute | the names are the contract, documented in `docs/observability.md`; installs no provider |
+| `src/guideme/telemetry.py` | every span, event, log record and attribute | the names are the contract, documented in `docs/observability.md`; installs no provider |
 | `src/guideme/api/__init__.py` | the wire mirror and the adapters to the core | mirrors `spec/schema/*.json` field for field; no policy here |
 | `src/guideme/api/client.py` | HTTP, retries, statuses to errors, one span per attempt | the only importer of `httpx`; every decision it makes is made by the pure `step` |
 | `src/guideme/guide.py` | `Guide`, `AsyncGuide`, `GuideBuilder`, `ModelInfo` | the two executors share `_prepare` and `_finish`; what is written twice is the two `await`s |
@@ -91,9 +91,14 @@ the rest are checked in review.
   its length, `guideme.state.bytes`, always does.
 - **Telemetry names are the contract.** They come from the OpenTelemetry semantic conventions
   where one exists (`gen_ai.*`, `http.*`, `server.*`, `url.*`, `error.type`) and are namespaced
-  `guideme.` otherwise. Numbers are `int`. A failure sets `error.type` and an ERROR span status;
-  no ERROR-level record is ever emitted and no exception event is ever recorded.
-- **The library installs nothing.** No tracer provider, no exporter, no logging handler.
+  `guideme.` otherwise. Numbers are `int`. An answer and a retry reach two signals, a span event
+  and an OTLP log record, and carry identical attributes on both; the record adds the severity
+  and the message the Rust SDK writes, and resolves its trace and span ids from the span it is
+  emitted inside. `events(...)` turns either signal off, and a mode that is not `span`, `log`
+  or `both` is a `ConfigError`. A failure sets `error.type` and an ERROR span status; no
+  ERROR-level log record is ever emitted and no exception event is ever recorded.
+- **The library installs nothing.** No tracer provider, no logger provider, no exporter, no
+  logging handler.
 - **Every public item has a docstring** (`ruff`'s `D` rules, Google style). A `Choice` or
   `Levels` member's docstring is not its rubric; its value is.
 - **Dependencies stay minimal.** Runtime is `httpx`, `pydantic`, `opentelemetry-api`. Adding one
@@ -116,13 +121,16 @@ is made in `guideme-rust` first, not here.
 
 ## Tests
 
-Few tests, high grade. The ceiling is 40 test functions; a parametrised function counts once.
-A new test must be one of:
+Few tests, high grade. The ceiling is 42 test functions; a parametrised function counts once.
+It was 40 before the logs signal, which is user-requested scope that the span assertions could
+not cover: correlation, severity and routing each need a record to look at. A new test must be
+one of:
 
 - a property test (`hypothesis`) over a law of `policy.resolve`, the shapes, or the wire types;
 - a wire or contract check through a real local HTTP server (`pytest-httpserver`), asserting on
   the received request and on typed results;
-- a structural tracing assertion through an in-memory span exporter, on field names and values;
+- a structural tracing assertion through an in-memory span exporter, or an in-memory log
+  record exporter, on field names and values;
 - a typing proof (`typing.assert_type` under `tests/typing/`) or a `pyright` negative under
   `tests/typing/expect_errors/`;
 - a structural import-boundary proof (AST) over `src/guideme`;

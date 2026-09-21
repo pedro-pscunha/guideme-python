@@ -16,6 +16,12 @@ First release, in progress. Nothing is on PyPI yet.
 - Shapes: a question, or a tuple, list or dict of shapes, answered in one request with ids
   `q0..qN` in encounter order. The typed forms are generated overloads, so the synchronous and
   asynchronous surfaces cannot drift.
+- Telemetry on two signals: one `guideme.ask` span per request with an HTTP client span per
+  attempt, and every answer and retry as both a span event and an OTLP log record, at `INFO`
+  and at `WARN`, carrying the trace and span ids of the span they came from. `events("span")`
+  or `events("log")` on the builder stores each one once where both pipelines run; `"both"` is
+  the default and costs nothing without a logger provider. No record is ever emitted at
+  `ERROR`: a failure is raised and marked on the span.
 - `spec/`: the JSON Schemas and the 42 golden policy vectors vendored from `guideme-rust`, run
   as the conformance suite, with a CI job that fails when this copy drifts from that
   repository's `main`.
