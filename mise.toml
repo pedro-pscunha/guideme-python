@@ -44,6 +44,10 @@ run = ["rm -rf dist", "uv build", "uv run --locked twine check dist/*"]
 
 [tasks.audit]
 description = "pip-audit over the locked dependency set"
+# `set -o pipefail` is a bash builtin; mise runs an inline script with `sh -c`,
+# which is dash on Linux and rejects it. Every multi-line task here names the
+# shell it is written for rather than relying on what /bin/sh happens to be.
+shell = "bash -c"
 # Auditing the environment would try to look guideme itself up on PyPI and, under
 # --strict, fail on not finding it. The lock file is what ships, so that is what
 # is audited: every group, pinned and hashed, with the project itself excluded.
@@ -69,6 +73,7 @@ run = [
 
 [tasks.spec-check]
 description = "Fail if spec/ differs from guideme-rust main"
+shell = "bash -c"
 # spec/SOURCE is provenance -- the guideme-rust commit this copy was taken
 # from -- and has no counterpart upstream, so it is the one path excluded from
 # the content diff. Everything else must match main exactly: the contract lives
@@ -84,6 +89,7 @@ echo "spec/ matches guideme-rust main"
 
 [tasks.hooks]
 description = "Activate the tracked git hooks in .githooks"
+shell = "bash -c"
 # Validate before configuring: a repo-local core.hooksPath replaces the global
 # one, so writing it and then failing would leave fewer gates than before.
 run = '''
