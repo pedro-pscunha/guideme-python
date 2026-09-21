@@ -14,7 +14,16 @@ from guideme.errors import (
     UnsureError,
 )
 from guideme.policy import Policy, Thresholds, Verdict
-from guideme.scalars import ApiKey, Confidence, Model, Probability
+from guideme.question import (
+    Ranked,
+    Scored,
+    choose,
+    choose_among,
+    noul,
+    score,
+    score_levels,
+)
+from guideme.scalars import ApiKey, Confidence, Key, Model, Probability, Rank
 
 __all__ = [
     "ApiKey",
@@ -24,17 +33,26 @@ __all__ = [
     "ConfigError",
     "GuidemeError",
     "InvalidError",
+    "Key",
     "Levels",
     "Model",
     "OverloadedError",
     "Policy",
     "Probability",
     "ProtocolError",
+    "Rank",
+    "Ranked",
     "RateLimitedError",
+    "Scored",
     "Thresholds",
     "TransportError",
     "UnexpectedStatusError",
     "UnsureError",
     "Verdict",
+    "choose",
+    "choose_among",
     "fallback",
+    "noul",
+    "score",
+    "score_levels",
 ]
