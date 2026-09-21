@@ -191,6 +191,36 @@ this repository as a new `spec/`.
 Renaming, adding or removing a span or event field is also a contract change, and it is
 announced to every other SDK the same way. `spec/` is unaffected by it.
 
+## Releasing
+
+`guideme` is published to PyPI by `.github/workflows/release.yml`, which a `v*` tag starts.
+Its `publish` job uses PyPI trusted publishing: PyPI trades the job's OIDC token for a
+short-lived upload token, so no PyPI credential exists in this repository's secrets and none
+should ever be added. PyPI checks four values, which are registered once by hand on the
+project's publishing page and must match the workflow exactly:
+
+| Field | Value |
+|---|---|
+| Owner | `pedro-pscunha` |
+| Repository | `guideme-python` |
+| Workflow | `release.yml` |
+| Environment | `pypi` |
+
+**A published version is permanent.** It can be yanked, which stops new installs resolving to
+it and leaves existing lock files alone, but it can never be deleted or replaced. Get the gate
+green before the tag, not after.
+
+1. Bump `version` in `pyproject.toml`. Then `uv lock` at the root and `uv lock` inside
+   `examples/otlp`: both lock files record the version, and both are resolved with `--locked`.
+2. Move the `Unreleased` notes in `CHANGELOG.md` under the new version with today's date.
+3. `mise run check`, then open a pull request and squash-merge it with CI green.
+4. On `main`, at that commit: `git tag -a vX.Y.Z -m vX.Y.Z` and `git push origin vX.Y.Z`. The
+   tag ruleset refuses a tag that is later moved or deleted, so tag the commit you mean.
+5. The tag starts the release workflow: `build` runs the whole gate and `uv build`, `publish`
+   uploads `dist/` from the `pypi` environment. Watch it with `gh run watch`.
+6. Check it landed: `https://pypi.org/project/guideme/X.Y.Z/`, and that
+   `uv pip install guideme==X.Y.Z` resolves in a fresh environment.
+
 ## Other SDKs
 
 Each guideme SDK lives in its own repository and is written from scratch in its own language.
