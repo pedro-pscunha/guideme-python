@@ -226,6 +226,10 @@ Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and 
 
 - `guideme.api` is the exact wire mirror of `POST /v1/systemone` and `GET /v1/models`, plus
   `Client` and `AsyncClient` for callers who want to build requests themselves.
+- The scalars are validated once and never re-checked: `Probability` and `Confidence` hold the
+  unit-interval numbers on `Verdict`, `Ranked` and `Scored`, `Key` and `Rank` are what a runtime
+  rubric answers with, `Model` names the model to ask, and `ApiKey` carries the key without ever
+  printing it.
 - `guideme.policy.resolve(answer, thresholds)` is the pure decision function. `spec/` holds
   its JSON Schemas and 42 golden vectors, vendored from
   [guideme-rust](https://github.com/pedro-pscunha/guideme-rust), which publishes the contract.

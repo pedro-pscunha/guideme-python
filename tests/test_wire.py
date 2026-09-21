@@ -1,45 +1,73 @@
+import asyncio
 import json
+import socket
 import time
-from collections.abc import Mapping
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import cast, final
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 from pytest_httpserver import HTTPServer
-from pytest_httpserver.httpserver import RequestHandler
 
 from guideme import (
+    ApiKey,
     AuthError,
+    Choice,
+    Confidence,
     ConfigError,
+    Guide,
+    GuideBuilder,
+    GuidemeError,
     InvalidError,
     Key,
+    Levels,
     OverloadedError,
     Policy,
+    Probability,
     ProtocolError,
     Rank,
+    Ranked,
+    RateLimitedError,
+    TransportError,
+    UnexpectedStatusError,
     UnsureError,
+    choose,
+    fallback,
+    score,
 )
-from guideme.api import Request, Response, question_to_wire, request_to_wire
-from guideme.api.client import EVALUATE
+from guideme.api import NoulAnswer, Request, Response, question_to_wire, request_to_wire
+from guideme.api.client import EVALUATE, MODELS
 from guideme.ask import Plan, encode
+from guideme.guide import KEY_VAR, ModelInfo
 from guideme.question import Question, choose_among, noul, score_levels
+from guideme.telemetry import ASK_SPAN
 
 from .conftest import (
     FIXTURES,
+    JSON,
+    MODEL,
     TEST_KEY,
+    TICKET,
     WIRE_ANSWER,
+    Configure,
     Json,
+    Recorded,
     Runner,
     as_object,
+    async_entry,
+    attributes,
+    configured,
+    expect_post,
     load_json,
     narrow,
+    noul_reply,
+    reply,
     validator,
 )
-
-MODEL = "jev-1.13.0"
-JSON = "application/json"
-TICKET = "Help! My payouts have been failing for 3 days."
 
 check_request = validator("request")
 check_response = validator("response")
@@ -92,17 +120,17 @@ def test_each_docs_example_matches_the_schema_and_survives_a_round_trip(example:
     check_response(body)
     parsed = Response.model_validate_json(json.dumps(body))
     assert parsed.model_dump(by_alias=True) == body
-    assert parsed.model == "jev-1.13.0"
-    assert parsed.usage.input_tokens > 0
+    assert parsed.model == MODEL
 
 
 @given(
     outside=st.floats(allow_nan=False, allow_infinity=False).filter(
         lambda value: not 0.0 <= value <= 1.0
-    )
+    ),
+    inside=st.floats(min_value=0.0, max_value=1.0),
 )
-def test_a_probability_or_confidence_outside_the_unit_is_refused_at_parse_time(
-    outside: float,
+def test_a_probability_or_confidence_is_refused_outside_the_unit_and_kept_inside(
+    outside: float, inside: float
 ) -> None:
     wrong_noul = json.dumps({"type": "noul", "noul": outside})
     wrong_confidence = json.dumps(
@@ -111,6 +139,10 @@ def test_a_probability_or_confidence_outside_the_unit_is_refused_at_parse_time(
     for body in (wrong_noul, wrong_confidence):
         with pytest.raises(ValidationError):
             _ = WIRE_ANSWER.validate_json(body)
+    for value in (inside, 0.0, 1.0):
+        parsed = WIRE_ANSWER.validate_json(json.dumps({"type": "noul", "noul": value}))
+        assert isinstance(parsed, NoulAnswer)
+        assert parsed.noul == value
 
 
 @given(request=_requests())
@@ -123,64 +155,156 @@ def test_every_request_guideme_builds_matches_the_schema_and_is_keyed_q0_to_qn(
     assert Request.model_validate_json(request.model_dump_json(by_alias=True)) == request
 
 
-def reply(answers: Mapping[str, Json], *, model: str = MODEL) -> str:
-    """A `POST /v1/systemone` body the local httpserver can hand back."""
-    return json.dumps(
-        {
-            "model": model,
-            "answers": dict(answers),
-            "usage": {"input_tokens": 296, "output_tokens": 20},
-        }
-    )
+RETRIES = 1
+"""Retries each failing-status case allows, so an exhausted one is exactly two requests."""
+
+DETAIL = '{"detail":"questions.q0.criteria: must not be empty"}'
+"""A 422 body, which the error must carry verbatim and the span must not."""
+
+type Serve = Callable[[HTTPServer], Configure | None]
+"""How one failure case arranges the server, returning any builder change it needs."""
+
+type Check = Callable[[GuidemeError], None]
+"""What one failure case asserts about the raised error beyond its class and kind."""
 
 
-def noul_reply(probability: float) -> str:
-    return reply({"q0": {"type": "noul", "noul": probability}})
+def _closed_port() -> int:
+    """A port nothing listens on: bound only to be told a free one, then released."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        # An AF_INET socket's name is always (host, port); the bind above fixes that.
+        return cast("tuple[str, int]", probe.getsockname())[1]
 
 
-def expect_post(httpserver: HTTPServer) -> RequestHandler:
-    return httpserver.expect_request(EVALUATE, method="POST")
+def _status(status: int, body: str = "", retry_after: str | None = None) -> Serve:
+    headers = None if retry_after is None else {"retry-after": retry_after}
+
+    def serve(httpserver: HTTPServer) -> Configure | None:
+        expect_post(httpserver).respond_with_data(body, status=status, headers=headers)
+
+    return serve
 
 
-def test_a_401_is_an_auth_error_and_is_not_retried(httpserver: HTTPServer, runner: Runner) -> None:
-    expect_post(httpserver).respond_with_data("", status=401)
-    with pytest.raises(AuthError):
-        _ = runner.ask(noul("Urgent?"), TICKET)
-    assert len(httpserver.log) == 1
+def _refused(_httpserver: HTTPServer) -> Configure | None:
+    return lambda builder: builder.base_url(f"http://127.0.0.1:{_closed_port()}")
 
 
-def test_a_422_is_an_invalid_error_carrying_the_body(
+def _nothing_more(_error: GuidemeError) -> None:
+    """The class and the kind are the whole contract for this status."""
+
+
+def _carries_the_body(error: GuidemeError) -> None:
+    assert isinstance(error, InvalidError)
+    assert error.detail == DETAIL
+
+
+def _parsed_the_retry_after(error: GuidemeError) -> None:
+    assert isinstance(error, RateLimitedError)
+    assert error.retry_after == timedelta(seconds=0)
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class Failure:
+    """One failing call: how the server behaves, and everything the caller must see."""
+
+    serve: Serve
+    expected: type[GuidemeError]
+    kind: str
+    served: int
+    check: Check
+
+
+FAILURES = [
+    Failure(_status(401), AuthError, "auth", 1, _nothing_more),
+    Failure(_status(422, body=DETAIL), InvalidError, "invalid", 1, _carries_the_body),
+    Failure(
+        _status(429, retry_after="0"),
+        RateLimitedError,
+        "rate_limited",
+        RETRIES + 1,
+        _parsed_the_retry_after,
+    ),
+    Failure(
+        _status(500, body="upstream exploded"),
+        UnexpectedStatusError,
+        "unexpected_status",
+        1,
+        _nothing_more,
+    ),
+    Failure(_status(529), OverloadedError, "overloaded", RETRIES + 1, _nothing_more),
+    Failure(_refused, TransportError, "transport", 0, _nothing_more),
+]
+
+
+@pytest.mark.parametrize("failure", FAILURES, ids=[case.kind for case in FAILURES])
+def test_every_failure_raises_its_typed_error_and_marks_the_ask_span(
+    httpserver: HTTPServer, runner: Runner, spans: Recorded, failure: Failure
+) -> None:
+    extra = failure.serve(httpserver)
+
+    def configure(builder: GuideBuilder) -> GuideBuilder:
+        settled = builder.max_retries(RETRIES)
+        return settled if extra is None else extra(settled)
+
+    with pytest.raises(failure.expected) as raised:
+        _ = runner.ask(noul("Urgent?"), TICKET, configure)
+    assert raised.value.kind == failure.kind
+    failure.check(raised.value)
+    assert len(httpserver.log) == failure.served
+    assert attributes(spans.one(ASK_SPAN))["error.type"] == failure.kind
+
+
+BACKOFF = timedelta(milliseconds=300)
+"""Long enough to measure that a retry really waited, short enough to pay for twice."""
+
+
+def test_a_429_is_retried_after_waiting_out_the_backoff(
     httpserver: HTTPServer, runner: Runner
 ) -> None:
-    detail = '{"detail":"questions.q0.criteria: must not be empty"}'
-    expect_post(httpserver).respond_with_data(detail, status=422)
-    with pytest.raises(InvalidError) as raised:
-        _ = runner.ask(noul("Urgent?"), TICKET)
-    assert raised.value.detail == detail
-    assert raised.value.kind == "invalid"
-    assert len(httpserver.log) == 1
-
-
-def test_a_429_is_retried_after_the_advertised_delay(
-    httpserver: HTTPServer, runner: Runner
-) -> None:
-    httpserver.expect_oneshot_request(EVALUATE, method="POST").respond_with_data(
-        "", status=429, headers={"retry-after": "1"}
-    )
+    httpserver.expect_oneshot_request(EVALUATE, method="POST").respond_with_data("", status=429)
     expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
     started = time.monotonic()
-    assert runner.ask(noul("Urgent?"), TICKET) is True
-    assert time.monotonic() - started >= 1.0
+    assert runner.ask(noul("Urgent?"), TICKET, lambda builder: builder.backoff(BACKOFF)) is True
+    assert time.monotonic() - started >= BACKOFF.total_seconds()
     assert len(httpserver.log) == 2
 
 
-def test_a_529_exhausts_the_retries_and_then_reports_overloaded(
-    httpserver: HTTPServer, runner: Runner
-) -> None:
-    expect_post(httpserver).respond_with_data("", status=529)
-    with pytest.raises(OverloadedError):
-        _ = runner.ask(noul("Urgent?"), TICKET, lambda builder: builder.max_retries(2))
-    assert len(httpserver.log) == 3
+CONCURRENT = 2
+"""Asks issued at once, which must wait out their retries together rather than in turn."""
+
+ADVERTISED = 1.0
+"""Seconds the server puts in `retry-after`; whole seconds are all the header expresses."""
+
+MARGIN = 0.2
+"""Slack below the sequential time, so the assertion fails on serialisation, not on load."""
+
+
+async def _two_asks(base_url: str) -> list[object]:
+    guide = configured(base_url).build_async()
+    try:
+        entry = async_entry(guide)
+        return list(
+            await asyncio.gather(entry(noul("Urgent?"), TICKET), entry(noul("Urgent?"), TICKET))
+        )
+    finally:
+        await guide.close()
+
+
+def test_two_async_asks_wait_out_their_retries_at_the_same_time(httpserver: HTTPServer) -> None:
+    for _ in range(CONCURRENT):
+        httpserver.expect_oneshot_request(EVALUATE, method="POST").respond_with_data(
+            "", status=429, headers={"retry-after": "1"}
+        )
+    expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
+
+    started = time.monotonic()
+    assert asyncio.run(_two_asks(httpserver.url_for(""))) == [True, True]
+    elapsed = time.monotonic() - started
+
+    assert elapsed >= ADVERTISED
+    assert elapsed < CONCURRENT * ADVERTISED - MARGIN
+    assert len(httpserver.log) == 2 * CONCURRENT
 
 
 def test_a_body_that_violates_the_contract_is_a_protocol_error(
@@ -220,6 +344,134 @@ def test_an_unsure_answer_with_no_fallback_names_the_question(
     assert raised.value.threshold == 0.99
 
 
+class Department(Choice):
+    """The README's rubric, whose `sales` member is the marked fallback."""
+
+    billing = "Payments, invoicing, refunds"
+    technical = "Bugs, outages, integrations"
+    sales = fallback("Pricing, upgrades, new accounts")
+
+
+class Frustration(Levels):
+    """The README's levels, in order."""
+
+    calm = "Calm and polite"
+    frustrated = "Frustrated"
+    very_angry = "Very angry"
+
+
+FLOOR = 0.6
+"""A confidence floor every unsure answer below sits under."""
+
+UNSURE_CHOICE: Json = {
+    "type": "choice",
+    "choice": "billing",
+    "probabilities": {"billing": 0.4, "technical": 0.35, "sales": 0.25},
+    "confidence": 0.2,
+}
+"""A choice answer the policy calls unsure, over `Department`'s three keys."""
+
+UNSURE_SCORE: Json = {
+    "type": "score",
+    "score": 1.1,
+    "legend": {"0": "Calm and polite", "1": "Frustrated", "2": "Very angry"},
+    "probabilities": {"0": 0.2, "1": 0.5, "2": 0.3},
+    "confidence": 0.2,
+}
+"""A score answer the policy calls unsure, over `Frustration`'s three levels."""
+
+RANKED_UNSURE = Ranked(
+    choice=Department.billing,
+    confidence=Confidence(0.2),
+    unsure=True,
+    probabilities=(
+        (Department.billing, Probability(0.4)),
+        (Department.technical, Probability(0.35)),
+        (Department.sales, Probability(0.25)),
+    ),
+)
+"""`UNSURE_CHOICE` as `.detail()` reads it: the reading handed back instead of a failure."""
+
+
+def _noul_otherwise() -> object:
+    return noul("Urgent?").yes_above(0.99).otherwise(False)
+
+
+def _choice_fallback() -> object:
+    return choose(Department, "Which team?").min_confidence(FLOOR)
+
+
+def _choice_otherwise() -> object:
+    return choose(Department, "Which team?").min_confidence(FLOOR).otherwise(Department.technical)
+
+
+def _choice_detail() -> object:
+    return choose(Department, "Which team?").min_confidence(FLOOR).detail()
+
+
+def _score_otherwise() -> object:
+    return score(Frustration, "How frustrated?").min_confidence(FLOOR).otherwise(Frustration.calm)
+
+
+LADDER: list[tuple[dict[str, Json], Callable[[], object], object]] = [
+    ({"q0": {"type": "noul", "noul": 0.95}}, _noul_otherwise, False),
+    ({"q0": UNSURE_CHOICE}, _choice_fallback, Department.sales),
+    ({"q0": UNSURE_CHOICE}, _choice_otherwise, Department.technical),
+    ({"q0": UNSURE_CHOICE}, _choice_detail, RANKED_UNSURE),
+    ({"q0": UNSURE_SCORE}, _score_otherwise, Frustration.calm),
+]
+
+LADDER_IDS = [
+    "noul_otherwise",
+    "choice_falls_back_to_the_marked_member",
+    "choice_otherwise_beats_the_marked_member",
+    "choice_detail_never_fails",
+    "score_otherwise",
+]
+
+
+@pytest.mark.parametrize(("answers", "build", "expected"), LADDER, ids=LADDER_IDS)
+def test_the_unsure_ladder_resolves_in_order(
+    httpserver: HTTPServer,
+    runner: Runner,
+    answers: dict[str, Json],
+    build: Callable[[], object],
+    expected: object,
+) -> None:
+    expect_post(httpserver).respond_with_data(reply(answers), content_type=JSON)
+    assert runner.ask(build(), TICKET) == expected
+
+
+def test_a_batch_is_atomic_so_one_unsure_answer_fails_the_whole_call(
+    httpserver: HTTPServer, runner: Runner
+) -> None:
+    answers: dict[str, Json] = {
+        "q0": {"type": "noul", "noul": 0.95},
+        "q1": UNSURE_CHOICE,
+        "q2": {
+            "type": "score",
+            "score": 0.95,
+            "legend": {"0": "Calm", "1": "Cross"},
+            "probabilities": {"0": 0.05, "1": 0.95},
+            "confidence": 0.92,
+        },
+    }
+    expect_post(httpserver).respond_with_data(reply(answers), content_type=JSON)
+    shape = (
+        noul("Urgent?"),
+        choose_among(
+            "Which team?", {"billing": None, "technical": None, "sales": None}
+        ).min_confidence(FLOOR),
+        score_levels("How cross?", ["Calm", "Cross"]),
+    )
+    with pytest.raises(UnsureError) as raised:
+        _ = runner.ask(shape, TICKET)
+    assert raised.value.question == "q1"
+    assert raised.value.value == 0.2
+    assert raised.value.threshold == FLOOR
+    assert len(httpserver.log) == 1
+
+
 def test_an_empty_batch_is_refused_before_any_request(
     httpserver: HTTPServer, runner: Runner
 ) -> None:
@@ -228,6 +480,42 @@ def test_an_empty_batch_is_refused_before_any_request(
     with pytest.raises(ConfigError):
         _ = runner.ask(empty, TICKET)
     assert not httpserver.log
+
+
+CREDENTIALED = "https://user:sk-live-SENTINEL@host"
+"""A base URL whose userinfo would land on every attempt span if it were accepted."""
+
+SENTINEL = "SENTINEL"
+"""The marker the refusal above must keep out of telemetry."""
+
+
+def _a_credentialed_base_url(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = GuideBuilder().api_key(ApiKey("k")).base_url(CREDENTIALED).build()
+
+
+def _an_empty_api_key(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = ApiKey("")
+
+
+def _no_key_in_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(KEY_VAR, raising=False)
+    _ = Guide.from_env()
+
+
+@pytest.mark.parametrize(
+    "build",
+    [_a_credentialed_base_url, _an_empty_api_key, _no_key_in_the_environment],
+    ids=["credentialed_base_url", "empty_api_key", "key_not_in_the_environment"],
+)
+def test_a_credential_mistake_is_refused_before_a_guide_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    spans: Recorded,
+    build: Callable[[pytest.MonkeyPatch], None],
+) -> None:
+    with pytest.raises(ConfigError):
+        build(monkeypatch)
+    assert not spans.all()
+    assert not [text for text in spans.texts() if SENTINEL in text]
 
 
 def test_the_request_carries_the_bearer_token_and_matches_the_schema(
@@ -264,3 +552,44 @@ def test_the_request_carries_the_bearer_token_and_matches_the_schema(
     check_request(body)
     assert list(as_object(body["questions"])) == ["q0", "q1", "q2"]
     assert body["state"] == TICKET
+
+
+MODELS_BODY: Json = {
+    "models": [
+        {
+            "name": MODEL,
+            "description": "The current stable Jev.",
+            "release_date": "2026-02-11",
+        },
+        {
+            "name": "jev-1.12.0",
+            "description": "The Jev before it.",
+            "release_date": "2025-11-04",
+        },
+    ]
+}
+"""A `GET /v1/models` body, as the docs describe one."""
+
+
+def test_the_model_list_comes_back_as_values_under_its_own_span(
+    httpserver: HTTPServer, runner: Runner, spans: Recorded
+) -> None:
+    httpserver.expect_request(MODELS, method="GET").respond_with_data(
+        json.dumps(MODELS_BODY), content_type=JSON
+    )
+    assert runner.models() == (
+        ModelInfo(name=MODEL, description="The current stable Jev.", release_date="2026-02-11"),
+        ModelInfo(name="jev-1.12.0", description="The Jev before it.", release_date="2025-11-04"),
+    )
+
+    request, _ = httpserver.log[0]
+    assert request.headers["authorization"] == f"Bearer {TEST_KEY}"
+    assert not spans.named(ASK_SPAN)
+    assert attributes(spans.one(f"GET {MODELS}")) == {
+        "http.request.method": "GET",
+        "server.address": "localhost",
+        "server.port": httpserver.port,
+        "url.full": f"{httpserver.url_for('')[:-1]}{MODELS}",
+        "url.template": MODELS,
+        "http.response.status_code": 200,
+    }

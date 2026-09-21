@@ -6,37 +6,26 @@ from pytest_httpserver import HTTPServer
 
 from guideme import AuthError, Policy
 from guideme.api.client import EVALUATE
-from guideme.question import choose_among, noul, score_levels
+from guideme.question import noul
 from guideme.telemetry import ANSWER_EVENT, ASK_SPAN, OPERATION, PROVIDER, RETRY_EVENT
 
-from .conftest import Recorded, Runner, attributes
-from .test_wire import JSON, MODEL, TICKET, expect_post, noul_reply, reply
+from .conftest import (
+    BATCH_ANSWERS,
+    JSON,
+    MODEL,
+    TICKET,
+    Recorded,
+    Runner,
+    attributes,
+    batch,
+    expect_post,
+    noul_reply,
+    reply,
+)
 
 ATTEMPT_SPAN = f"POST {EVALUATE}"
-BATCH_ANSWERS = {
-    "q0": {"type": "noul", "noul": 0.95},
-    "q1": {
-        "type": "choice",
-        "choice": "billing",
-        "probabilities": {"billing": 0.88, "sales": 0.12},
-        "confidence": 0.81,
-    },
-    "q2": {
-        "type": "score",
-        "score": 0.95,
-        "legend": {"0": "Calm", "1": "Cross"},
-        "probabilities": {"0": 0.05, "1": 0.95},
-        "confidence": 0.92,
-    },
-}
-
-
-def batch() -> tuple[object, object, object]:
-    return (
-        noul("Urgent?"),
-        choose_among("Which team?", {"billing": None, "sales": None}),
-        score_levels("How cross?", ["Calm", "Cross"]),
-    )
+UNAUTHORIZED = "unauthorized: missing or invalid TypeSafe API key"
+"""The `guideme.ask` status description a 401 must carry, spelled out."""
 
 
 def test_one_ask_span_carries_the_documented_fields_with_a_child_and_an_event_each(
@@ -124,6 +113,7 @@ def test_a_failed_ask_marks_the_error_type_and_status_and_records_no_exception(
     assert attributes(ask)["error.type"] == "auth"
     assert ask.status.status_code is StatusCode.ERROR
     assert ask.status.description == AuthError().describe()
+    assert ask.status.description == UNAUTHORIZED
     assert "gen_ai.response.model" not in attributes(ask)
 
     attempt = spans.one(ATTEMPT_SPAN)
@@ -172,7 +162,7 @@ def test_the_state_is_recorded_only_when_the_guide_was_asked_to(
     assert "guideme.state" not in silent
     assert silent["guideme.state.bytes"] == len(compact.encode())
 
-    spans.exporter.clear()
+    spans.reset()
     _ = runner.ask(noul("Urgent?"), state, lambda builder: builder.record_state(True))
     recorded = attributes(spans.one(ASK_SPAN))
     assert recorded["guideme.state"] == compact

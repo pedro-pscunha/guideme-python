@@ -117,7 +117,13 @@ A new test must be one of:
 - a structural tracing assertion through an in-memory span exporter, on field names and values;
 - a typing proof (`typing.assert_type` under `tests/typing/`) or a `pyright` negative under
   `tests/typing/expect_errors/`;
+- a structural import-boundary proof (AST) over `src/guideme`;
 - a redaction proof.
+
+Two of the illegal states this package refuses cannot be checker errors: an enum body is opaque
+to pyright, so a `Choice` with two `fallback` members and a `Levels` with one member are a
+`ConfigError` raised at class definition, proven in `tests/test_enums.py`. Every other negative
+stays a `pyright` failure under `tests/typing/expect_errors/`.
 
 Never assert on log or `repr` text, except to prove a secret is absent. Never mock `policy`,
 `Guide` or the transport.
