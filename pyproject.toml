@@ -130,6 +130,13 @@ disable = [
   "suppressed-message",        # ditto
 ]
 
+[tool.pylint.basic]
+# A Choice member's name is the key that goes on the wire and a Levels member's
+# name is a level in the caller's domain. Both are named by that domain, not by
+# Python's constant convention, so the enum bodies in this package and in its
+# tests are lower case on purpose.
+class-const-naming-style = "any"
+
 [tool.pylint.design]
 max-args = 8
 max-positional-arguments = 8

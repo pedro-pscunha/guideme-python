@@ -1,5 +1,6 @@
 """Type-safe inline judgments from TypeSafe Jev."""
 
+from guideme.enums import Choice, Levels, fallback
 from guideme.errors import (
     AuthError,
     ConfigError,
@@ -18,10 +19,12 @@ from guideme.scalars import ApiKey, Confidence, Model, Probability
 __all__ = [
     "ApiKey",
     "AuthError",
+    "Choice",
     "Confidence",
     "ConfigError",
     "GuidemeError",
     "InvalidError",
+    "Levels",
     "Model",
     "OverloadedError",
     "Policy",
@@ -33,4 +36,5 @@ __all__ = [
     "UnexpectedStatusError",
     "UnsureError",
     "Verdict",
+    "fallback",
 ]
