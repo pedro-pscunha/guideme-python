@@ -182,22 +182,6 @@ def _describe(kind: str, config: _Config, endpoint: Endpoint) -> str:
     )
 
 
-def _from_env() -> "GuideBuilder":
-    """A builder configured from the environment. The key is required; the rest are not."""
-    key = os.environ.get(KEY_VAR)
-    if key is None:
-        detail = f"{KEY_VAR} is not set"
-        raise ConfigError(detail)
-    builder = GuideBuilder().api_key(ApiKey(key))
-    base_url = os.environ.get(BASE_URL_VAR)
-    if base_url is not None:
-        builder = builder.base_url(base_url)
-    model = os.environ.get(MODEL_VAR)
-    if model is not None:
-        builder = builder.model(Model(model))
-    return builder
-
-
 @final
 class Guide(SyncAskOverloads):
     """A configured entry point to Jev. Build one and share it; it owns a connection pool."""
@@ -210,7 +194,7 @@ class Guide(SyncAskOverloads):
     @staticmethod
     def from_env() -> "Guide":
         """Read `TYPESAFE_API_KEY`, and `TYPESAFE_BASE_URL` and `GUIDEME_MODEL` if they are set."""
-        return _from_env().build()
+        return GuideBuilder().from_env().build()
 
     @staticmethod
     def builder() -> "GuideBuilder":
@@ -261,7 +245,7 @@ class AsyncGuide(AsyncAskOverloads):
     @staticmethod
     def from_env() -> "AsyncGuide":
         """Read `TYPESAFE_API_KEY`, and `TYPESAFE_BASE_URL` and `GUIDEME_MODEL` if they are set."""
-        return _from_env().build_async()
+        return GuideBuilder().from_env().build_async()
 
     @staticmethod
     def builder() -> "GuideBuilder":
@@ -326,6 +310,29 @@ class GuideBuilder:
     def api_key(self, key: ApiKey) -> Self:
         """The API key. Required unless the guide is built by `from_env`."""
         self._api_key = key
+        return self
+
+    def from_env(self) -> Self:
+        """Apply `TYPESAFE_API_KEY`, and `TYPESAFE_BASE_URL` and `GUIDEME_MODEL` if they are set.
+
+        `Guide.from_env()` is this followed by `build()`. Reach for the builder form when a
+        setting has no environment variable, as `Guide.builder().from_env().events("log")`
+        does: the environment still supplies the key and the origin.
+
+        Raises:
+            ConfigError: `TYPESAFE_API_KEY` is not set.
+        """
+        key = os.environ.get(KEY_VAR)
+        if key is None:
+            detail = f"{KEY_VAR} is not set"
+            raise ConfigError(detail)
+        self._api_key = ApiKey(key)
+        base_url = os.environ.get(BASE_URL_VAR)
+        if base_url is not None:
+            self._base_url = base_url
+        model = os.environ.get(MODEL_VAR)
+        if model is not None:
+            self._model = Model(model)
         return self
 
     def base_url(self, url: str) -> Self:

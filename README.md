@@ -250,6 +250,23 @@ Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and 
   [`docs/contract.md`](docs/contract.md) says what every guideme SDK must satisfy and
   [`docs/design.md`](docs/design.md) records the design and its sharp edges.
 
+## Other SDKs
+
+Every guideme SDK is written from scratch in its own language and answers the same way,
+because they all satisfy one contract: the wire schemas, the 42 golden policy vectors and the
+interface shape that [guideme-rust](https://github.com/pedro-pscunha/guideme-rust) publishes
+under `spec/` and states in
+[`docs/contract.md`](https://github.com/pedro-pscunha/guideme-rust/blob/main/docs/contract.md).
+
+| Language | Package | Repository |
+|---|---|---|
+| Python | `guideme` | this repository |
+| Rust | [`guideme`](https://crates.io/crates/guideme) | [guideme-rust](https://github.com/pedro-pscunha/guideme-rust) |
+
+This repository vendors that `spec/` and records the commit it came from in `spec/SOURCE`; a
+CI job fails when the copy drifts from the Rust repository's `main`. The span, event and
+attribute names are shared too, so one dashboard reads both SDKs.
+
 ## Environment
 
 | Variable | Meaning |
