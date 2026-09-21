@@ -157,10 +157,12 @@ list or dict, which is the shape above.
 
 ```python
 guide = Guide.from_env()
-answer = guide.ask(noul("Is this urgent?"), ticket)
+urgent = guide.ask(noul("Is this urgent?"), ticket)
 
-aguide = AsyncGuide.from_env()
-answer = await aguide.ask(noul("Is this urgent?"), ticket)
+
+async def is_urgent(ticket: str) -> bool:
+    aguide = AsyncGuide.from_env()
+    return await aguide.ask(noul("Is this urgent?"), ticket)
 ```
 
 `Guide.builder()` and `AsyncGuide.builder()` return the same `GuideBuilder`; `.build()` gives

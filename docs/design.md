@@ -71,9 +71,10 @@ Each module survives the test.
 - **`fallback(…)` returns a `str` subclass.** The member's value stays its rubric, exactly like
   every other member's, and the marking lives in the type rather than in a second attribute a
   caller could read or set.
-- **`Levels` writes its own comparisons.** `functools.total_ordering` and `IntEnum` both make a
-  level comparable with things that are not levels; four explicit dunders typed `(self, other:
-  Self)` make a comparison across two different `Levels` classes a checker error.
+- **`Levels` writes its own comparisons.** `IntEnum` would make a level comparable with any
+  integer and with any other `IntEnum`, which is the comparison this exists to reject. Four
+  dunders typed `(self, other: Self)` make `Frustration.calm >= Urgency.low` a checker error
+  instead.
 - **Async is asyncio.** `AsyncGuide` sleeps with `asyncio.sleep` and holds an
   `httpx.AsyncClient`. No `anyio` dependency, and the test suite runs coroutines with
   `asyncio.run` rather than adding a pytest plugin.
@@ -94,9 +95,9 @@ Each module survives the test.
   events. They are positions in encounter order, nothing more.
 - **`Key` and `Rank`** are only meaningful through `choose_among` and `score_levels`. They are
   `NewType`s over `str` and `int`, so nothing else hands you one.
-- **`Question` is not exported.** The goal's export list fixes the public surface, and a
-  question's type is what its constructor returns, so callers annotate by inference. Import it
-  from `guideme.question` when you need to write the type of a stored question down.
+- **`Question` is not exported.** The public surface is exactly `__all__`, and a question's
+  type is whatever its constructor returns, so callers annotate by inference. Import it from
+  `guideme.question` when you need to write the type of a stored question down.
 - **Two `Question`s.** `guideme.question.Question` is the user-facing value;
   `guideme.api`'s question model is the wire shape it becomes.
 - **State is JSON-shaped.** Anything `json.dumps` accepts without a default hook. A dataclass
