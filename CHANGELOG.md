@@ -38,18 +38,25 @@ changes to it.
   only under `record_state(True)`; its length always is. The logs API is private in
   `opentelemetry-api`, so it is resolved defensively: a release without it costs the logs
   signal and nothing else, and `events("log")` or `events("both")` is then a `ConfigError`
-  where the guide is configured rather than records that silently go nowhere. A sink that
-  raises is swallowed, so a logging failure never reaches the caller or the ask span.
+  where the guide is configured rather than records that silently go nowhere. That holds for
+  a release that renames a severity or changes what a log record takes, not only for one that
+  removes the module: everything guideme reads from the private API is resolved once, behind
+  the one guard. A sink that raises is swallowed, so a logging failure never reaches the
+  caller or the ask span; a record guideme cannot build is not a sink failure and is not
+  swallowed.
 - One error tree under `GuidemeError`, each class carrying the `.kind` string every guideme
   SDK reports: `AuthError`, `InvalidError`, `RateLimitedError`, `OverloadedError`,
   `TransportError`, `UnexpectedStatusError`, `ProtocolError`, `UnsureError` and `ConfigError`.
   A `ConfigError` is raised where the mistake is written, before a socket is opened.
-- `ApiKey`, which carries the key and never prints it: its `repr` is `ApiKey(***)`, it has no
-  `__str__` and no serialisation, and it is scrubbed from anything the package reports.
+- `ApiKey`, which carries the key and never prints it: `repr` and `str` are both `ApiKey(***)`,
+  it has no serialisation and refuses to pickle, and it is scrubbed from anything the package
+  reports.
   `Probability`, `Confidence`, `Key`, `Rank` and `Model` are the other validated scalars.
-- `guideme.api` as a second supported tier: the wire mirror of `POST /v1/systemone` and
-  `GET /v1/models`, with `Client` and `AsyncClient` in `guideme.api.client`, and
-  `guideme.policy.resolve` as the pure decision function.
+- `guideme.api`, `guideme.policy` and `guideme.question` as a second supported tier: the wire
+  mirror of `POST /v1/systemone` and `GET /v1/models`, with `Client` and `AsyncClient` in
+  `guideme.api.client`; `guideme.policy.resolve` as the pure decision function; and
+  `guideme.question.Question`, the type every question constructor returns, for annotating a
+  question you store or pass on.
 - `GuideBuilder.from_env()` applies `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` and
   `GUIDEME_MODEL` onto a builder, so a setting with no environment variable can be chained
   after them; `Guide.from_env()` and `AsyncGuide.from_env()` are that step plus `build()`.

@@ -250,9 +250,13 @@ lazily, so either works whether it runs before or after `import guideme`. Call `
 before the process exits, or the last batch never leaves. Install only the tracer provider
 and the log records go nowhere at no cost, which is why `events("both")` is the default.
 
-The logs API lives in `opentelemetry._logs` in OpenTelemetry 1.44.0. The underscore is the
-package's, not a private detail of this one: the module is the public logs API and has no
-alias without it.
+The logs API lives in `opentelemetry._logs` in OpenTelemetry 1.44.0, and that underscore is
+the whole reason the import is deferred and guarded. There is no public alias, so a release
+of `opentelemetry-api` inside the range guideme accepts may move it, rename what is in it, or
+change what `LogRecord` takes, with none of the notice a public name would come with. guideme
+therefore resolves everything it needs from that module once, inside one guard: if any of it
+is gone, the logs signal is absent, `import guideme` still works, traces are untouched, and
+`events("log")` and `events("both")` say so rather than emitting nothing.
 
 To see the same data on the console instead, swap the exporter for
 `opentelemetry.sdk.trace.export.ConsoleSpanExporter`. `examples/otlp` is a runnable version

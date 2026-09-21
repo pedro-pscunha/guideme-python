@@ -133,9 +133,11 @@ Each module survives the test.
   `Guide.from_env()`; those are what validate the policy and the origin before a socket opens.
 - **`with_policy` shares the pool.** The copy holds the same client, so `close()` on either the
   original or the copy closes the connection pool for both.
-- **`Question` is not exported.** The public surface is exactly `__all__`, and a question's
-  type is whatever its constructor returns, so callers annotate by inference. Import it from
-  `guideme.question` when you need to write the type of a stored question down.
+- **`Question` is supported, and not in `__all__`.** The top-level surface is a fixed list and
+  a question's type is whatever its constructor returns, so callers annotate by inference.
+  `guideme.question` is the second tier, beside `guideme.api` and `guideme.policy`, and
+  carries the same promise: import `Question` from there when you need to write the type of a
+  stored question down.
 - **Two `Question`s.** `guideme.question.Question` is the user-facing value;
   `guideme.api`'s question model is the wire shape it becomes.
 - **State is JSON-shaped.** Anything `json.dumps` accepts without a default hook. A dataclass

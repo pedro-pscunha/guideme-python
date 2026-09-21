@@ -9,10 +9,12 @@ A Python package that makes a TypeSafe Jev judgment usable as control flow: a ye
 published to PyPI under `MIT OR Apache-2.0`. The public surface has two tiers:
 
 - the 33 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
-- `guideme.api` and `guideme.policy`, imported by their own path and not re-exported at the
-  top level. `guideme.api` is the wire mirror and `guideme.api.client` holds `Client` and
-  `AsyncClient`; `guideme.policy` holds `resolve`. The README's **Lower layers** section is
-  where they are documented for callers.
+- `guideme.api`, `guideme.policy` and `guideme.question`, imported by their own path and not
+  re-exported at the top level. `guideme.api` is the wire mirror and `guideme.api.client`
+  holds `Client` and `AsyncClient`; `guideme.policy` holds `resolve`; `guideme.question`
+  holds `Question`, which is what every constructor in the first tier returns and the only
+  way to write the type of a stored question down. The README's **Lower layers** section is
+  where all three are documented for callers.
 
 Everything else in the package is private, whatever its name looks like.
 
@@ -92,8 +94,10 @@ the rest are checked in review.
   OTLP log record whose sink raises is swallowed. The provider, the processor and the exporter
   are the application's, an ask that reached its answer must return it, and a span saying the
   ask succeeded must not be contradicted by a failure to store a log. That failure is visible
-  where it belongs, in the application's own logging pipeline. Nothing else in `src` swallows
-  anything.
+  where it belongs, in the application's own logging pipeline. The guard covers that call and
+  nothing else: the record is built before it, so a `LogRecord` this package cannot construct
+  is caught in `resolve_logs` and makes the signal absent, loudly, instead of being swallowed
+  once per answer. Nothing else in `src` swallows anything.
 - **A rubric's text is unique, and a rubric is the caller's to get wrong once.** Two members of
   a `Choice` or a `Levels` sharing a value are aliases in Python, not two options, so a repeat
   is a `ConfigError` on the class statement; so is `fallback(…)` on a `Levels`, which has
@@ -119,7 +123,11 @@ the rest are checked in review.
   distribution, so `telemetry.resolve_logs` imports it defensively and its absence is a value.
   A release that moves it must cost the logs signal and nothing else: `import guideme` still
   works, the traces signal is untouched, and `events("span")` still routes every answer and
-  retry. Asking for the signal that is not there, `events("log")` or `events("both")`, is a
+  retry. Every read of that API lives inside the one guard — the import, both severity
+  members, both `get_logger` calls and a throwaway `LogRecord` built with the five keywords
+  `Logs._emit` uses — and `ImportError`, `AttributeError` and `TypeError` all mean the same
+  thing there. A guard narrower than the promise is the promise being false: a module that
+  still imports and has lost a member would otherwise kill `import guideme` at module scope. Asking for the signal that is not there, `events("log")` or `events("both")`, is a
   `ConfigError` naming the version and both ways out. The default `"both"` is not such an ask,
   so it degrades to the span alone, which is all an application without the logs API could have
   exported anyway. `latest-deps` in CI resolves the range unpinned so a move is seen early; it
