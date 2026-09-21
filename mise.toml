@@ -43,8 +43,16 @@ description = "sdist + wheel, then twine check"
 run = ["rm -rf dist", "uv build", "uv run --locked twine check dist/*"]
 
 [tasks.audit]
-description = "pip-audit over the locked environment"
-run = "uv run --locked pip-audit --strict --progress-spinner off"
+description = "pip-audit over the locked dependency set"
+# Auditing the environment would try to look guideme itself up on PyPI and, under
+# --strict, fail on not finding it. The lock file is what ships, so that is what
+# is audited: every group, pinned and hashed, with the project itself excluded.
+run = '''
+set -euo pipefail
+mkdir -p .tmp
+uv export --quiet --locked --all-groups --no-emit-project --format requirements.txt -o .tmp/requirements.txt
+uv run --locked pip-audit --strict --no-deps --requirement .tmp/requirements.txt --progress-spinner off
+'''
 
 [tasks.check]
 description = "The full gate, cheapest first"

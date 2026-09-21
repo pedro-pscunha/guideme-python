@@ -126,6 +126,7 @@ disable = [
   "missing-class-docstring",   # ruff D101 owns it
   "missing-function-docstring",  # ruff D103 owns it
   "too-few-public-methods",    # frozen value objects have one method on purpose
+  "duplicate-code",            # the surface test restates __all__ on purpose; sharing it would make it tautological
   "locally-disabled",          # every disable carries its reason on the line
   "suppressed-message",        # ditto
 ]
