@@ -199,6 +199,18 @@ def question_to_wire(instructions: Json, spec: Spec) -> Question:
             return ScoreQuestion(instructions=instructions, criteria=list(levels))
 
 
+def validation_detail(error: ValidationError) -> str:
+    """One compact line from a pydantic failure, with the offending value left out.
+
+    That value is either the caller's state or a response body, and this text becomes a
+    span's status description, where neither belongs. Pydantic's own message quotes the
+    input and appends a documentation URL.
+    """
+    first = error.errors(include_url=False, include_input=False)[0]
+    where = ".".join(str(part) for part in first["loc"]) or "(root)"
+    return f"{where}: {first['msg']} ({error.error_count()} errors)"
+
+
 def request_to_wire(state: Json, model: str, questions: Mapping[str, Question]) -> Request:
     """Build the request body.
 
@@ -208,7 +220,7 @@ def request_to_wire(state: Json, model: str, questions: Mapping[str, Question]) 
     try:
         return Request(state=state, model=model, questions=dict(questions))
     except ValidationError as error:
-        detail = f"state is not JSON-shaped: {error}"
+        detail = f"state is not JSON-shaped: {validation_detail(error)}"
         raise ConfigError(detail) from error
 
 
