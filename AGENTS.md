@@ -47,6 +47,13 @@ import the package's own `__init__`, which imports the executors, which import `
 `docs/design.md` records the decisions and the sharp edges. Update it when a decision changes.
 `docs/contract.md` says where the cross-SDK contract lives and how drift from it is caught.
 
+`examples/` holds runnable programs. Each is its own uv project with its own lock file, so the
+root gate lints and type-checks them but never resolves them, and their dependencies stay out
+of the library's. Run one with `uv run main.py` inside its directory. CI does resolve
+`examples/otlp` with `--locked`, and its lock file pins `guideme` through a path dependency, so
+a change to the library's dependency set **or its version** must refresh
+`examples/otlp/uv.lock` in the same pull request: `uv lock` inside `examples/otlp` rewrites it.
+
 ## Invariants
 
 These hold everywhere in `src/guideme`. `ruff`, `pyright` and `pylint` enforce most of them;

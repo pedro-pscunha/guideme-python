@@ -3,7 +3,11 @@ name = "guideme-otlp-example"
 version = "0.0.0"
 description = "Runnable guideme example, resolved outside the library's lock file"
 requires-python = ">=3.12"
-dependencies = ["guideme"]
+dependencies = [
+  "guideme",
+  "opentelemetry-sdk==1.44.0",
+  "opentelemetry-exporter-otlp-proto-grpc==1.44.0",
+]
 
 [dependency-groups]
 dev = ["ruff==0.16.8", "pyright==1.1.414"]
@@ -23,6 +27,7 @@ extend = "../../pyproject.toml"
 "*.py" = [
   "T201",    # a runnable example prints
   "INP001",  # an example is a program, not a package
+  "FBT003",  # .otherwise(False) passes the unsure answer, which for a noul is a bool
 ]
 
 [tool.pyright]

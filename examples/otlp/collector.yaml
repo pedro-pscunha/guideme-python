@@ -1,0 +1,25 @@
+# A collector that prints everything it receives. Enough to see exactly what guideme
+# exports; swap the debug exporter for your backend's when you are done looking.
+#
+#   docker run --rm -d --name guideme-otel -p 4317:4317 -p 4318:4318 \
+#     -v "$PWD:/conf:ro" \
+#     otel/opentelemetry-collector-contrib:latest --config=/conf/collector.yaml
+#   docker logs -f guideme-otel
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
