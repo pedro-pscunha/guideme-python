@@ -1,6 +1,7 @@
+# pylint: disable=redefined-outer-name  # a pytest fixture is requested by its own name
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -9,6 +10,10 @@ from typing import cast, final
 import pytest
 from hypothesis import HealthCheck, settings
 from jsonschema import Draft202012Validator
+from opentelemetry import trace
+from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from pydantic import TypeAdapter
 from pytest_httpserver import HTTPServer
 
@@ -217,3 +222,52 @@ class Runner:
 def runner(request: pytest.FixtureRequest, httpserver: HTTPServer) -> Runner:
     """Every wire and tracing assertion runs twice, once per kind, from this one fixture."""
     return Runner(kind=str(request.param), base_url=httpserver.url_for(""))
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class Recorded:
+    """What one test exported, queried by name."""
+
+    exporter: InMemorySpanExporter
+
+    def all(self) -> tuple[ReadableSpan, ...]:
+        """Every span that finished during this test, in the order they finished."""
+        return self.exporter.get_finished_spans()
+
+    def named(self, name: str) -> list[ReadableSpan]:
+        """Every span with this name."""
+        return [span for span in self.all() if span.name == name]
+
+    def one(self, name: str) -> ReadableSpan:
+        """The single span with this name, or a failure naming what was there instead."""
+        found = self.named(name)
+        assert len(found) == 1, [span.name for span in self.all()]
+        return found[0]
+
+    def events(self, span: ReadableSpan, name: str) -> list[Event]:
+        """Every event on `span` with this name."""
+        return [event for event in span.events if event.name == name]
+
+
+def attributes(carrier: ReadableSpan | Event) -> dict[str, object]:
+    """A span's or an event's attributes as a plain dict."""
+    return dict(carrier.attributes or {})
+
+
+@pytest.fixture(scope="session")
+def exporter() -> InMemorySpanExporter:
+    """The one tracer provider this process installs. OpenTelemetry allows exactly one."""
+    collected = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(collected))
+    trace.set_tracer_provider(provider)
+    return collected
+
+
+@pytest.fixture
+def spans(exporter: InMemorySpanExporter) -> Iterator[Recorded]:
+    """What one test exported, with whatever earlier tests left behind cleared away."""
+    exporter.clear()
+    yield Recorded(exporter)
+    exporter.clear()

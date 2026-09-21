@@ -1,5 +1,6 @@
 import json
 import time
+from collections.abc import Mapping
 
 import pytest
 from hypothesis import given
@@ -122,12 +123,12 @@ def test_every_request_guideme_builds_matches_the_schema_and_is_keyed_q0_to_qn(
     assert Request.model_validate_json(request.model_dump_json(by_alias=True)) == request
 
 
-def reply(answers: dict[str, Json], *, model: str = MODEL) -> str:
+def reply(answers: Mapping[str, Json], *, model: str = MODEL) -> str:
     """A `POST /v1/systemone` body the local httpserver can hand back."""
     return json.dumps(
         {
             "model": model,
-            "answers": answers,
+            "answers": dict(answers),
             "usage": {"input_tokens": 296, "output_tokens": 20},
         }
     )
