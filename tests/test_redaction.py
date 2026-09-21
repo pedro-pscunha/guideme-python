@@ -4,15 +4,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import final
 
+import httpx
 import pytest
 from opentelemetry.trace import StatusCode
 from pytest_httpserver import HTTPServer
 
-from guideme import ApiKey, GuidemeError, InvalidError, UnexpectedStatusError
+from guideme import ApiKey, GuidemeError, InvalidError, TransportError, UnexpectedStatusError
 from guideme.question import noul
 from guideme.telemetry import ASK_SPAN
 
-from .conftest import TEST_KEY, TICKET, Recorded, Runner, attributes, expect_post
+from .conftest import TEST_KEY, TICKET, Recorded, Runner, attributes, expect_post, nowhere
 
 SENTINEL = "only-the-error-body-carries-this"
 """A marker nothing but the response body holds, so finding it on a span proves a leak."""
@@ -27,6 +28,23 @@ def test_api_key_never_leaks_through_repr_str_json_or_pickle() -> None:
         _ = json.dumps(key)
     with pytest.raises(TypeError):
         _ = pickle.dumps(key)
+
+
+def test_a_transport_failure_carries_no_key_on_its_cause_or_in_the_client(
+    runner: Runner,
+) -> None:
+    with pytest.raises(TransportError) as raised:
+        _ = runner.ask(noul("Urgent?"), TICKET, nowhere)
+
+    error = raised.value
+    cause = error.__cause__
+    assert isinstance(cause, httpx.RequestError)
+    assert TEST_KEY not in str(error)
+    assert TEST_KEY not in repr(cause)
+    # The header the attempt was sent with, dropped before the cause was chained on.
+    assert "authorization" not in cause.request.headers
+    assert TEST_KEY not in str(dict(cause.request.headers))
+    assert TEST_KEY not in runner.internals()
 
 
 def _invalid_detail(error: GuidemeError) -> str:

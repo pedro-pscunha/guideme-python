@@ -1,11 +1,10 @@
 import asyncio
 import json
-import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import cast, final
+from typing import final
 
 import pytest
 from hypothesis import given
@@ -25,6 +24,7 @@ from guideme import (
     InvalidError,
     Key,
     Levels,
+    Model,
     OverloadedError,
     Policy,
     Probability,
@@ -60,6 +60,7 @@ from .conftest import (
     as_object,
     async_entry,
     attributes,
+    closed_port,
     configured,
     expect_post,
     load_json,
@@ -168,14 +169,6 @@ type Check = Callable[[GuidemeError], None]
 """What one failure case asserts about the raised error beyond its class and kind."""
 
 
-def _closed_port() -> int:
-    """A port nothing listens on: bound only to be told a free one, then released."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        # An AF_INET socket's name is always (host, port); the bind above fixes that.
-        return cast("tuple[str, int]", probe.getsockname())[1]
-
-
 def _status(status: int, body: str = "", retry_after: str | None = None) -> Serve:
     headers = None if retry_after is None else {"retry-after": retry_after}
 
@@ -186,7 +179,7 @@ def _status(status: int, body: str = "", retry_after: str | None = None) -> Serv
 
 
 def _refused(_httpserver: HTTPServer) -> Configure | None:
-    return lambda builder: builder.base_url(f"http://127.0.0.1:{_closed_port()}")
+    return lambda builder: builder.base_url(f"http://127.0.0.1:{closed_port()}")
 
 
 def _nothing_more(_error: GuidemeError) -> None:
@@ -472,13 +465,36 @@ def test_a_batch_is_atomic_so_one_unsure_answer_fails_the_whole_call(
     assert len(httpserver.log) == 1
 
 
-def test_an_empty_batch_is_refused_before_any_request(
-    httpserver: HTTPServer, runner: Runner
+def _an_empty_batch() -> object:
+    empty: list[Question[bool]] = []
+    return empty
+
+
+def _instructions_holding_a_nan() -> object:
+    return noul({"x": float("nan")})
+
+
+def _instructions_json_cannot_carry() -> object:
+    # `bytes` is a `Sequence[int]` and so satisfies `Json`; `json.dumps` refuses it.
+    return noul(b"not text")
+
+
+UNSENDABLE: list[Callable[[], object]] = [
+    _an_empty_batch,
+    _instructions_holding_a_nan,
+    _instructions_json_cannot_carry,
+]
+
+UNSENDABLE_IDS = ["empty_batch", "instructions_holding_a_nan", "instructions_json_cannot_carry"]
+
+
+@pytest.mark.parametrize("build", UNSENDABLE, ids=UNSENDABLE_IDS)
+def test_a_shape_the_wire_cannot_carry_is_refused_before_any_request(
+    httpserver: HTTPServer, runner: Runner, build: Callable[[], object]
 ) -> None:
     expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
-    empty: list[Question[bool]] = []
     with pytest.raises(ConfigError):
-        _ = runner.ask(empty, TICKET)
+        _ = runner.ask(build(), TICKET)
     assert not httpserver.log
 
 
@@ -502,12 +518,40 @@ def _no_key_in_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     _ = Guide.from_env()
 
 
+def _an_api_key_of_spaces(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = ApiKey("   ")
+
+
+def _an_empty_model(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = Model("")
+
+
+def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # A `str` is a `Sequence[str]`, so the checker allows it and the scale would be
+    # the three letters of "abc".
+    _ = score_levels("How cross?", "abc")
+
+
 @pytest.mark.parametrize(
     "build",
-    [_a_credentialed_base_url, _an_empty_api_key, _no_key_in_the_environment],
-    ids=["credentialed_base_url", "empty_api_key", "key_not_in_the_environment"],
+    [
+        _a_credentialed_base_url,
+        _an_empty_api_key,
+        _no_key_in_the_environment,
+        _an_api_key_of_spaces,
+        _an_empty_model,
+        _levels_given_as_one_string,
+    ],
+    ids=[
+        "credentialed_base_url",
+        "empty_api_key",
+        "key_not_in_the_environment",
+        "api_key_of_spaces",
+        "empty_model",
+        "levels_given_as_one_string",
+    ],
 )
-def test_a_credential_mistake_is_refused_before_a_guide_exists(
+def test_a_configuration_mistake_is_refused_before_a_guide_exists(
     monkeypatch: pytest.MonkeyPatch,
     spans: Recorded,
     build: Callable[[pytest.MonkeyPatch], None],
@@ -518,8 +562,29 @@ def test_a_credential_mistake_is_refused_before_a_guide_exists(
     assert not [text for text in spans.texts() if SENTINEL in text]
 
 
+ELSEWHERE = "/v1/systemone-elsewhere"
+"""Where the redirect case points. Same origin, so `httpx` keeps the bearer on the hop."""
+
+
+def _served_directly(httpserver: HTTPServer, body: str) -> None:
+    expect_post(httpserver).respond_with_data(body, content_type=JSON)
+
+
+def _served_after_a_redirect(httpserver: HTTPServer, body: str) -> None:
+    expect_post(httpserver).respond_with_data("", status=307, headers={"location": ELSEWHERE})
+    httpserver.expect_request(ELSEWHERE, method="POST").respond_with_data(body, content_type=JSON)
+
+
+@pytest.mark.parametrize(
+    ("arrange", "served"),
+    [(_served_directly, 1), (_served_after_a_redirect, 2)],
+    ids=["direct", "after_a_307"],
+)
 def test_the_request_carries_the_bearer_token_and_matches_the_schema(
-    httpserver: HTTPServer, runner: Runner
+    httpserver: HTTPServer,
+    runner: Runner,
+    arrange: Callable[[HTTPServer, str], None],
+    served: int,
 ) -> None:
     answers: dict[str, Json] = {
         "q0": {"type": "noul", "noul": 0.95},
@@ -537,15 +602,16 @@ def test_the_request_carries_the_bearer_token_and_matches_the_schema(
             "confidence": 0.92,
         },
     }
-    expect_post(httpserver).respond_with_data(reply(answers), content_type=JSON)
+    arrange(httpserver, reply(answers))
     batch = (
         noul("Urgent?").criteria("needs a person now", "can wait"),
         choose_among("Which team?", {"billing": "Money", "sales": None}),
         score_levels("How cross?", ["Calm", "Cross"]),
     )
     assert runner.ask(batch, TICKET) == (True, Key("billing"), Rank(1))
+    assert len(httpserver.log) == served
 
-    request, _ = httpserver.log[0]
+    request, _ = httpserver.log[-1]
     assert request.headers["authorization"] == f"Bearer {TEST_KEY}"
     assert request.headers["content-type"] == JSON
     body = as_object(narrow(request.get_json()))

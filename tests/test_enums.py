@@ -9,6 +9,15 @@ from guideme import ConfigError
 from guideme.enums import Choice, Levels, fallback
 
 
+def _compare(low: Levels, high: Levels) -> bool:
+    """Compare two levels through a signature too wide to see whether they share a scale.
+
+    That is what a caller holding a `Levels`-typed value has; the checker's half of the
+    proof is `tests/typing/expect_errors/levels_cross_compare.py`.
+    """
+    return low >= high
+
+
 def _two_fallbacks() -> type[Choice]:
     class TwoFallbacks(Choice):
         a = fallback("first")
@@ -29,6 +38,30 @@ def _option_that_is_not_text() -> type[Choice]:
         a = 1
 
     return NotText
+
+
+def _duplicate_choice_rubric() -> type[Choice]:
+    class Duplicated(Choice):
+        a = "the same sentence"
+        b = "the same sentence"
+
+    return Duplicated
+
+
+def _duplicate_level_rubric() -> type[Levels]:
+    class Duplicated(Levels):
+        low = "the same sentence"
+        high = "the same sentence"
+
+    return Duplicated
+
+
+def _fallback_on_a_level() -> type[Levels]:
+    class Marked(Levels):
+        can_wait = fallback("Can wait")
+        today = "Today"
+
+    return Marked
 
 
 def _one_level() -> type[Levels]:
@@ -85,6 +118,14 @@ def test_levels_are_totally_ordered_by_declaration() -> None:
     assert Frustration.from_index(2) is Frustration.very_angry
     assert Frustration.from_index(3) is None
 
+    class Urgency(Levels):
+        can_wait = "Can wait"
+        today = "Today"
+
+    assert _compare(Frustration.calm, Frustration.very_angry) is False
+    with pytest.raises(TypeError):
+        _ = _compare(Frustration.calm, Urgency.today)
+
 
 REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _two_fallbacks,
@@ -92,6 +133,9 @@ REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _option_that_is_not_text,
     _one_level,
     _eleven_levels,
+    _duplicate_choice_rubric,
+    _duplicate_level_rubric,
+    _fallback_on_a_level,
 ]
 
 REFUSED_IDS = [
@@ -100,6 +144,9 @@ REFUSED_IDS = [
     "an_option_that_is_not_text",
     "one_level",
     "eleven_levels",
+    "two_options_with_the_same_rubric",
+    "two_levels_with_the_same_rubric",
+    "a_fallback_marker_on_a_levels",
 ]
 
 

@@ -2,6 +2,7 @@
 import asyncio
 import dataclasses
 import json
+import socket
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
@@ -243,6 +244,30 @@ def kind_of(param: object) -> Kind:
     raise ValueError(message)
 
 
+def closed_port() -> int:
+    """A port nothing listens on: bound only to be told a free one, then released."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        # An AF_INET socket's name is always (host, port); the bind above fixes that.
+        return cast("tuple[str, int]", probe.getsockname())[1]
+
+
+def nowhere(builder: GuideBuilder) -> GuideBuilder:
+    """Point a guide at a closed port, so the next ask fails in transport."""
+    return builder.base_url(f"http://127.0.0.1:{closed_port()}").max_retries(0)
+
+
+def client_vars(guide: Guide | AsyncGuide) -> str:
+    """`vars` of a guide's client, where a bearer held in instance state would show.
+
+    Reaching for the private attribute is the point: what this proves is that nothing
+    inside the client holds the key, and that is a statement about its private state.
+    """
+    # pylint: disable=protected-access  # the redaction proof reads what is private on purpose
+    inner = guide._client  # noqa: SLF001 # pyright: ignore[reportPrivateUsage] -- redaction proof
+    return repr(vars(inner))
+
+
 def configured(base_url: str, configure: Configure | None = None) -> GuideBuilder:
     """The builder every local-server test starts from: the test key, that origin, 10 ms backoff."""
     builder = (
@@ -315,6 +340,23 @@ class Runner:
         guide = self._builder(None).build_async()
         try:
             return await guide.models()
+        finally:
+            await guide.close()
+
+    def internals(self) -> str:
+        """`vars` of this kind's client, built and closed the way every other call is."""
+        if self.kind == SYNC:
+            guide = self._builder(None).build()
+            try:
+                return client_vars(guide)
+            finally:
+                guide.close()
+        return asyncio.run(self._internals_async())
+
+    async def _internals_async(self) -> str:
+        guide = self._builder(None).build_async()
+        try:
+            return client_vars(guide)
         finally:
             await guide.close()
 

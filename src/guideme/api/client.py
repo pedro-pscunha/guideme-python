@@ -52,7 +52,12 @@ JITTER = timedelta(milliseconds=250)
 """Added to each backoff so a fleet retrying together spreads out."""
 
 OK = 200
-"""The contract's only success. Redirects are followed; anything else is an error."""
+"""The contract's only success.
+
+Redirects are followed by the client, so a `3xx` never reaches this code; anything else
+that does is an error. `httpx` drops the authorization header when a redirect changes
+origin, which is what keeps a redirected key from leaving the API's own host.
+"""
 
 UNAUTHORIZED = 401
 UNPROCESSABLE = 422
@@ -195,10 +200,36 @@ def _auth(api_key: ApiKey) -> dict[str, str]:
     `ApiKey._expose` is this package's stand-in for Rust's `pub(crate) expose`: off the
     published surface, reachable from the module that has to send the key. Both checkers
     are told about that here, and this is the only call.
+
+    Called once per request rather than once per client, so the bearer string lives only
+    as long as the request that carries it. A client holds the `ApiKey`, which prints as
+    `ApiKey(***)`, so a `vars()`, a debugger or a crash reporter finds nothing to read.
     """
     # pylint: disable=protected-access  # the sole reader, as _expose's docstring says
     key = api_key._expose()  # noqa: SLF001 # pyright: ignore[reportPrivateUsage] -- sole reader
     return {"authorization": f"Bearer {key}"}
+
+
+def _sending(api_key: ApiKey) -> dict[str, str]:
+    """The headers of one `POST`: the bearer, and the one content type the API takes."""
+    return {**_auth(api_key), "content-type": "application/json"}
+
+
+def _scrub(error: httpx.HTTPError) -> None:
+    """Drop the bearer from the failed request an `httpx` error carries.
+
+    The error is chained onto the `TransportError` as its `__cause__`, so the request it
+    holds travels with every traceback and every crash report, and that request carries
+    the header `_auth` just built. The failed attempt is over, so nothing needs it.
+    """
+    if not isinstance(error, httpx.RequestError):
+        return
+    try:
+        request = error.request
+    except RuntimeError:
+        # httpx raises rather than returning None when the error carries no request.
+        return
+    _ = request.headers.pop("authorization", None)
 
 
 def _models(span: Span, status: int, body: str, retry_after: timedelta | None) -> list[ModelEntry]:
@@ -219,7 +250,8 @@ def _models(span: Span, status: int, body: str, retry_after: timedelta | None) -
 
 
 def _transport(span: Span, error: httpx.HTTPError) -> TransportError:
-    """Mark the attempt span for a request that never got a response."""
+    """Mark the attempt span for a request that never got a response, and scrub its key."""
+    _scrub(error)
     failure = TransportError(error)
     fail_attempt(span, failure.kind)
     return failure
@@ -232,12 +264,11 @@ class Client:
     def __init__(
         self, api_key: ApiKey, endpoint: Endpoint, retry: RetryPolicy, timeout: timedelta
     ) -> None:
-        """Open the connection pool. The key is turned into a header and never stored raw."""
+        """Open the connection pool. The key is held as an `ApiKey`, never as a header."""
         self.endpoint = endpoint
         self._retry = retry
-        self._get_headers = _auth(api_key)
-        self._post_headers = {**self._get_headers, "content-type": "application/json"}
-        self._http = httpx.Client(timeout=timeout.total_seconds())
+        self._api_key = api_key
+        self._http = httpx.Client(timeout=timeout.total_seconds(), follow_redirects=True)
 
     def evaluate(self, request: Request) -> Response:
         """`POST /v1/systemone`, resending a `429` or a `529` up to the retry policy's limit."""
@@ -248,7 +279,7 @@ class Client:
                 "POST", url, EVALUATE, self.endpoint.host, self.endpoint.port, attempt
             ) as span:
                 try:
-                    response = self._http.post(url, content=body, headers=self._post_headers)
+                    response = self._http.post(url, content=body, headers=_sending(self._api_key))
                 except httpx.HTTPError as error:
                     raise _transport(span, error) from error
                 record_status(span, response.status_code)
@@ -277,7 +308,7 @@ class Client:
         url = self.endpoint.url(MODELS)
         with attempt_span("GET", url, MODELS, self.endpoint.host, self.endpoint.port, 0) as span:
             try:
-                response = self._http.get(url, headers=self._get_headers)
+                response = self._http.get(url, headers=_auth(self._api_key))
             except httpx.HTTPError as error:
                 raise _transport(span, error) from error
             record_status(span, response.status_code)
@@ -297,12 +328,11 @@ class AsyncClient:
     def __init__(
         self, api_key: ApiKey, endpoint: Endpoint, retry: RetryPolicy, timeout: timedelta
     ) -> None:
-        """Open the connection pool. The key is turned into a header and never stored raw."""
+        """Open the connection pool. The key is held as an `ApiKey`, never as a header."""
         self.endpoint = endpoint
         self._retry = retry
-        self._get_headers = _auth(api_key)
-        self._post_headers = {**self._get_headers, "content-type": "application/json"}
-        self._http = httpx.AsyncClient(timeout=timeout.total_seconds())
+        self._api_key = api_key
+        self._http = httpx.AsyncClient(timeout=timeout.total_seconds(), follow_redirects=True)
 
     async def evaluate(self, request: Request) -> Response:
         """`POST /v1/systemone`, resending a `429` or a `529` up to the retry policy's limit."""
@@ -313,7 +343,9 @@ class AsyncClient:
                 "POST", url, EVALUATE, self.endpoint.host, self.endpoint.port, attempt
             ) as span:
                 try:
-                    response = await self._http.post(url, content=body, headers=self._post_headers)
+                    response = await self._http.post(
+                        url, content=body, headers=_sending(self._api_key)
+                    )
                 except httpx.HTTPError as error:
                     raise _transport(span, error) from error
                 record_status(span, response.status_code)
@@ -342,7 +374,7 @@ class AsyncClient:
         url = self.endpoint.url(MODELS)
         with attempt_span("GET", url, MODELS, self.endpoint.host, self.endpoint.port, 0) as span:
             try:
-                response = await self._http.get(url, headers=self._get_headers)
+                response = await self._http.get(url, headers=_auth(self._api_key))
             except httpx.HTTPError as error:
                 raise _transport(span, error) from error
             record_status(span, response.status_code)

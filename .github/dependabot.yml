@@ -2,18 +2,22 @@ version: 2
 
 # The actions in .github/workflows are pinned to commit shas. Dependabot is
 # what moves them, and what moves the pinned tools in pyproject.toml.
+#
+# The Python entries are `uv`, not `pip`: the gate and CI resolve with --locked,
+# and the pip ecosystem does not update uv.lock, so a pip-shaped pull request
+# would change pyproject.toml alone and fail its own CI.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
 
-  - package-ecosystem: pip
+  - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
 
-  - package-ecosystem: pip
+  - package-ecosystem: uv
     directory: /examples/otlp
     schedule:
       interval: weekly
