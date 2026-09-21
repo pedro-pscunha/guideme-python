@@ -59,6 +59,10 @@ scan_for_secrets() {
 # Turn a scan_for_secrets status into a message and a refusal. $1 is the status,
 # $2 is a bare noun phrase for what was scanned ("staged change", "push to
 # refs/heads/main"), $3 is the command to inspect it with, or empty.
+#
+# `unlistable` is not a gitleaks status: it is what a caller passes when git could
+# not enumerate the commits to scan, so gitleaks was never given anything to do.
+# Blaming the scanner for that would send the reader to the wrong tool.
 refuse_on_secrets() {
 	local status="$1" scanned="$2" inspect="$3"
 	case "$status" in
@@ -66,6 +70,10 @@ refuse_on_secrets() {
 	2)
 		echo "gitleaks: potential secret in the $scanned — blocked." >&2
 		[ -n "$inspect" ] && echo "  Inspect with: $inspect" >&2
+		;;
+	unlistable)
+		echo "git could not list the commits for the $scanned, so there was nothing to hand gitleaks — blocked; unlisted is not clean." >&2
+		[ -n "$inspect" ] && echo "  Reproduce with: $inspect" >&2
 		;;
 	*)
 		echo "gitleaks did not run (exit $status), so the $scanned is unscanned — blocked; unscanned is not clean." >&2

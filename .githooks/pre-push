@@ -51,7 +51,7 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
 
 	scanned="push to $remote_ref"
 	if ! git rev-list --quiet "${range[@]}" -- 2>/dev/null; then
-		refuse_on_secrets 1 "$scanned" "" || exit 1
+		refuse_on_secrets unlistable "$scanned" "git rev-list ${range[*]} --" || exit 1
 	fi
 
 	status=0
