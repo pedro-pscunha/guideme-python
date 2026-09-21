@@ -6,17 +6,26 @@ Rules for anyone (or anything) changing this repository. Read fully before editi
 
 A Python package that makes a TypeSafe Jev judgment usable as control flow: a yes/no is an
 `if`, a choice is an exhaustive `match`, a score is a comparison. One distribution, `guideme`,
-published to PyPI under `MIT OR Apache-2.0`. The public surface is exactly the names listed in
-`__all__` in `src/guideme/__init__.py`, nothing else.
+published to PyPI under `MIT OR Apache-2.0`. The public surface has two tiers:
 
-That surface is a published API. Anything removed or renamed in it is a breaking change for
+- the 33 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
+- `guideme.api` and `guideme.policy`, imported by their own path and not re-exported at the
+  top level. `guideme.api` is the wire mirror and `guideme.api.client` holds `Client` and
+  `AsyncClient`; `guideme.policy` holds `resolve`. The README's **Lower layers** section is
+  where they are documented for callers.
+
+Everything else in the package is private, whatever its name looks like.
+
+Both tiers are a published API. Anything removed or renamed in either is a breaking change for
 people who do not work here, so it needs a major bump and a `CHANGELOG.md` entry.
 
 This is not a translation of the Rust SDK. It is written in Python's idiom and satisfies the
 same published contract. The contract lives in
 [`guideme-rust`](https://github.com/pedro-pscunha/guideme-rust): `docs/contract.md` states it
-and `spec/` pins it. The live TypeSafe docs are the source of truth for the wire itself:
-`https://docs.typesafe.ai/api.md`.
+and `spec/` pins it. The live TypeSafe docs are the source of truth for the wire itself, over
+two pages: `https://docs.typesafe.ai/api.md` covers `POST /v1/systemone` and
+`https://docs.typesafe.ai/models.md` covers `GET /v1/models`. Read both before touching
+`src/guideme/api/`.
 
 ## Layout and seams
 
@@ -60,7 +69,9 @@ These hold everywhere in `src/guideme`. `ruff`, `pyright` and `pylint` enforce m
 the rest are checked in review.
 
 - **Every suppression names its rule and its reason, on the same line.** `# noqa: RULE -- why`,
-  `# pyright: ignore[rule] -- why`, `# pylint: disable=rule; why`. A bare `# type: ignore` is
+  `# pyright: ignore[rule] -- why`, `# pylint: disable=rule  # why`. pylint reads everything
+  after `disable=` as rule names, so its reason goes in a second comment, not after a
+  semicolon. A bare `# type: ignore` is
   forbidden, and `reportUnnecessaryTypeIgnoreComment` fails a suppression that stopped applying.
 - **No `Any`.** The only untyped value is the caller's state and instructions, typed as `Json`
   and serialised at the boundary. `pyright` 1.1.414 has no `reportAny`, so this one is held by
@@ -258,12 +269,15 @@ green before the tag, not after.
 1. Bump `version` in `pyproject.toml`. Then `uv lock` at the root and `uv lock` inside
    `examples/otlp`: both lock files record the version, and both are resolved with `--locked`.
 2. Move the `Unreleased` notes in `CHANGELOG.md` under the new version with today's date.
-3. `mise run check`, then open a pull request and squash-merge it with CI green.
-4. On `main`, at that commit: `git tag -a vX.Y.Z -m vX.Y.Z` and `git push origin vX.Y.Z`. The
+3. Refresh the **What arrives** capture in `docs/observability.md`, or elide the version in it.
+   Its `InstrumentationScope guideme X.Y.Z` lines carry the version the capture was taken at,
+   so they go stale on the first bump and a reader cannot tell a stale capture from a real one.
+4. `mise run check`, then open a pull request and squash-merge it with CI green.
+5. On `main`, at that commit: `git tag -a vX.Y.Z -m vX.Y.Z` and `git push origin vX.Y.Z`. The
    tag ruleset refuses a tag that is later moved or deleted, so tag the commit you mean.
-5. The tag starts the release workflow: `build` runs the whole gate and `uv build`, `publish`
+6. The tag starts the release workflow: `build` runs the whole gate and `uv build`, `publish`
    uploads `dist/` from the `pypi` environment. Watch it with `gh run watch`.
-6. Check it landed: `https://pypi.org/project/guideme/X.Y.Z/`, and that
+7. Check it landed: `https://pypi.org/project/guideme/X.Y.Z/`, and that
    `uv pip install guideme==X.Y.Z` resolves in a fresh environment.
 
 ## Other SDKs

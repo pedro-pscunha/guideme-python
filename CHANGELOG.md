@@ -6,10 +6,19 @@ Nothing yet.
 
 ## 0.1.0 — 2026-09-21
 
-First release.
+First release. Everything below is new, so this entry lists the surface rather than the
+changes to it.
 
+- `Guide` and `AsyncGuide`, built by `Guide.from_env()`, `AsyncGuide.from_env()` or the shared
+  `GuideBuilder`, which takes `api_key`, `base_url`, `model`, `policy`, `max_retries`,
+  `backoff`, `timeout`, `events` and `record_state` and ends in `.build()` or
+  `.build_async()`. Both guides answer `ask`, `models`, `with_policy` and `close`.
+- One verb: `ask(shape, state)`. `models()` returns `tuple[ModelInfo, ...]`, one entry per
+  model the account may use, with its name, description and release date.
 - Questions as values: `noul`, `choose`, `score`, `choose_among`, `score_levels`, with
   `.yes_above`, `.no_below`, `.min_confidence`, `.criteria`, `.otherwise` and `.detail`.
+  A `Choice` takes 1 to 255 options and a `Levels` 2 to 10, checked where the rubric is
+  written.
 - `Choice` and `Levels` enum bases: a member's name is its wire key and its value is its
   rubric, `fallback(...)` marks the member to use when the policy says unsure, and both
   validate where the enum is written. Two members may not share a rubric, because Python
@@ -25,11 +34,22 @@ First release.
   and at `WARN`, carrying the trace and span ids of the span they came from. `events("span")`
   or `events("log")` on the builder stores each one once where both pipelines run; `"both"` is
   the default and costs nothing without a logger provider. No record is ever emitted at
-  `ERROR`: a failure is raised and marked on the span. The logs API is private in
+  `ERROR`: a failure is raised and marked on the span. The state is recorded on the ask span
+  only under `record_state(True)`; its length always is. The logs API is private in
   `opentelemetry-api`, so it is resolved defensively: a release without it costs the logs
   signal and nothing else, and `events("log")` or `events("both")` is then a `ConfigError`
   where the guide is configured rather than records that silently go nowhere. A sink that
   raises is swallowed, so a logging failure never reaches the caller or the ask span.
+- One error tree under `GuidemeError`, each class carrying the `.kind` string every guideme
+  SDK reports: `AuthError`, `InvalidError`, `RateLimitedError`, `OverloadedError`,
+  `TransportError`, `UnexpectedStatusError`, `ProtocolError`, `UnsureError` and `ConfigError`.
+  A `ConfigError` is raised where the mistake is written, before a socket is opened.
+- `ApiKey`, which carries the key and never prints it: its `repr` is `ApiKey(***)`, it has no
+  `__str__` and no serialisation, and it is scrubbed from anything the package reports.
+  `Probability`, `Confidence`, `Key`, `Rank` and `Model` are the other validated scalars.
+- `guideme.api` as a second supported tier: the wire mirror of `POST /v1/systemone` and
+  `GET /v1/models`, with `Client` and `AsyncClient` in `guideme.api.client`, and
+  `guideme.policy.resolve` as the pure decision function.
 - `GuideBuilder.from_env()` applies `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` and
   `GUIDEME_MODEL` onto a builder, so a setting with no environment variable can be chained
   after them; `Guide.from_env()` and `AsyncGuide.from_env()` are that step plus `build()`.

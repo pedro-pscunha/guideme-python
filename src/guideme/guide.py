@@ -348,7 +348,12 @@ class GuideBuilder:
         return self
 
     def base_url(self, url: str) -> Self:
-        """Override the API origin, for a test server or a proxy. It may not carry credentials."""
+        """Override the API origin, for a test server or a proxy. It may not carry credentials.
+
+        Unlike the other setters this one stores the string and checks it later:
+        a malformed origin, or one carrying a user or a password, is a
+        `ConfigError` from `build()` or `build_async()`, not from here.
+        """
         self._base_url = url
         return self
 
@@ -363,12 +368,20 @@ class GuideBuilder:
         return self
 
     def max_retries(self, count: int) -> Self:
-        """Resends for `429` and `529`; 3 by default, `0` to never resend."""
+        """Resends for `429` and `529`; 3 by default, `0` to never resend.
+
+        Raises:
+            ConfigError: `count` is negative.
+        """
         self._retry = replace(self._retry, max_retries=count)
         return self
 
     def backoff(self, base: timedelta) -> Self:
-        """Base delay of the exponential backoff; 500 ms by default."""
+        """Base delay of the exponential backoff; 500 ms by default.
+
+        Raises:
+            ConfigError: `base` is negative.
+        """
         self._retry = replace(self._retry, backoff=base)
         return self
 
@@ -378,6 +391,9 @@ class GuideBuilder:
         `httpx` applies it to connecting, writing, reading and pool acquisition
         separately rather than as one deadline for the attempt, so an attempt that is
         slow in more than one phase can outlast it. See `DEFAULT_TIMEOUT`.
+
+        Raises:
+            ConfigError: `per_attempt` is zero or negative.
         """
         if per_attempt <= timedelta():
             detail = f"timeout {per_attempt} is not positive"
@@ -392,7 +408,7 @@ class GuideBuilder:
         filters anything, and which costs a traces-only application nothing: with no
         logger provider installed the record goes to OpenTelemetry's no-op logger. An
         application exporting traces and logs to the same backend sets `"span"` or
-        `"log"` so each event is stored once.
+        `"log"` so each event is stored once. `docs/observability.md` has the table.
 
         `"span"` needs nothing but the traces API. `"log"` and `"both"` need the logs
         API, which `opentelemetry-api` keeps private, so asking for either where the
@@ -417,12 +433,22 @@ class GuideBuilder:
         return self
 
     def build(self) -> Guide:
-        """Build a synchronous guide, validating the policy and the origin now."""
+        """Build a synchronous guide, validating the policy and the origin now.
+
+        Raises:
+            ConfigError: no API key was set, the `base_url` is malformed or
+                carries credentials, or the policy's thresholds are out of range.
+        """
         key, endpoint, config = self._settle()
         return Guide(Client(key, endpoint, self._retry, self._timeout, self._events), config)
 
     def build_async(self) -> AsyncGuide:
-        """Build an asyncio guide, validating the policy and the origin now."""
+        """Build an asyncio guide, validating the policy and the origin now.
+
+        Raises:
+            ConfigError: no API key was set, the `base_url` is malformed or
+                carries credentials, or the policy's thresholds are out of range.
+        """
         key, endpoint, config = self._settle()
         client = AsyncClient(key, endpoint, self._retry, self._timeout, self._events)
         return AsyncGuide(client, config)

@@ -20,6 +20,7 @@ DOCUMENTED = frozenset(
         "Key",
         "Levels",
         "Model",
+        "ModelInfo",
         "OverloadedError",
         "Policy",
         "Probability",

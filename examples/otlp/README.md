@@ -38,11 +38,11 @@ answers arrive as span events as well.
 
 ## What it prints
 
-Four answers, from three requests. A single yes/no question. Then a batch of three questions
-in one request: the team to route to, the customer's frustration in full detail, and whether a
-refund was asked for, with a fallback so an unsure answer does not fail the batch. Then the
-same score question under a confidence floor of `0.999`, which nothing satisfies, so it raises
-`UnsureError` and its span carries `error.type = "unsure"`.
+Three requests: four answers, then a refusal. A single yes/no question. Then a batch of three
+questions in one request: the team to route to, the customer's frustration in full detail, and
+whether a refund was asked for, with a fallback so an unsure answer does not fail the batch.
+Then the same score question under a confidence floor of `0.999`, which nothing satisfies, so
+it answers nothing and raises `UnsureError`, and its span carries `error.type = "unsure"`.
 
 ## Where the spans go
 

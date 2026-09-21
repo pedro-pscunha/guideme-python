@@ -63,6 +63,10 @@ class Choice(Enum):
 
     A member's name is the key sent on the wire and read back; its value is the
     rubric. Mark at most one member with `fallback(...)`.
+
+    A `Choice` needs 1 to 255 options. The count is checked on the class
+    statement, so a rubric outside that range is a `ConfigError` where the enum
+    is written rather than on the first ask.
     """
 
     def __init_subclass__(cls) -> None:
@@ -109,6 +113,10 @@ class Levels(Enum):
     as `answer >= Frustration.frustrated`; comparing two different `Levels`
     classes is a type error, and a `TypeError` at runtime for a caller who is not
     type-checked.
+
+    A `Levels` needs 2 to 10 members. The count is checked on the class
+    statement, so a rubric outside that range is a `ConfigError` where the enum
+    is written rather than on the first ask.
     """
 
     def __init_subclass__(cls) -> None:
