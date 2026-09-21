@@ -179,7 +179,61 @@ jobs:
       - name: Resolve every dependency at its newest allowed version
         run: uv sync --upgrade --all-groups
 
-      - name: What it resolved
+      # uv prints "Resolved N packages" whether it re-resolved or reused the lock,
+      # so that line is not the proof. This one is: it reads the committed lock out
+      # of git, because `--upgrade` has already rewritten the copy on disk, and
+      # prints what the lock pins beside what the job resolved. Equal today, since
+      # every runtime dependency is pinned at a floor that is also its newest
+      # release; the day one moves, this step says so in one line, and a reader six
+      # months from now can tell the job did its job either way.
+      - name: What it resolved, against what the lock pins
+        run: |
+          uv run --no-sync python - <<'PY'
+          import importlib.metadata as metadata
+          import subprocess
+          import tomllib
+
+          RUNTIME = ("httpx", "pydantic", "opentelemetry-api")
+
+          committed = subprocess.run(
+              ["git", "show", "HEAD:uv.lock"], capture_output=True, text=True, check=True
+          ).stdout
+          pinned = {p["name"]: p["version"] for p in tomllib.loads(committed)["package"]}
+
+
+          def installed(name):
+              try:
+                  return metadata.version(name)
+              except metadata.PackageNotFoundError:
+                  return None
+
+
+          for name in RUNTIME:
+              got = installed(name) or "(not installed)"
+              was = pinned.get(name, "(not in the lock)")
+              note = "same as the lock" if got == was else f"NEWER than the lock's {was}"
+              print(f"{name:<20} resolved {got:<14} {note}")
+
+          moved = []
+          elsewhere = 0
+          for name, was in pinned.items():
+              if name == "guideme":
+                  continue
+              got = installed(name)
+              if got is None:
+                  elsewhere += 1
+              elif got != was:
+                  moved.append(name)
+
+          print()
+          if moved:
+              print(f"{len(moved)} resolved newer than the lock: {', '.join(sorted(moved))}")
+          else:
+              print("nothing in the lock has a newer release today; the range and the lock agree")
+          print(f"({elsewhere} locked for another platform, not installed here)")
+          PY
+
+      - name: Everything it resolved
         run: uv pip list
 
       # The import is the half that a moved `opentelemetry._logs` would break for
