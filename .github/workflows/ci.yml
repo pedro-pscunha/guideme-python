@@ -167,8 +167,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # The workflow-wide UV_LOCKED=1 is the opposite of this job's purpose.
-      UV_LOCKED: ""
+      # The workflow-wide UV_LOCKED=1 is the opposite of this job's purpose. It has
+      # to be turned off with a value uv can parse: an empty string is rejected as
+      # `expected a boolish value`, not read as unset.
+      UV_LOCKED: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
