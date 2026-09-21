@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import cast
 
 import pytest
@@ -70,10 +71,6 @@ def test_choice_exposes_rubric_keys_and_fallback_and_refuses_a_bad_definition() 
     assert Department.from_key("technical") is Department.technical
     assert Department.from_key("marketing") is None
 
-    for build in (_two_fallbacks, _no_options, _option_that_is_not_text):
-        with pytest.raises(ConfigError):
-            _ = build()
-
 
 def test_levels_are_totally_ordered_by_declaration() -> None:
     class Frustration(Levels):
@@ -88,9 +85,30 @@ def test_levels_are_totally_ordered_by_declaration() -> None:
     assert Frustration.from_index(2) is Frustration.very_angry
     assert Frustration.from_index(3) is None
 
-    for build in (_one_level, _eleven_levels):
-        with pytest.raises(ConfigError):
-            _ = build()
+
+REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
+    _two_fallbacks,
+    _no_options,
+    _option_that_is_not_text,
+    _one_level,
+    _eleven_levels,
+]
+
+REFUSED_IDS = [
+    "two_fallbacks",
+    "no_options",
+    "an_option_that_is_not_text",
+    "one_level",
+    "eleven_levels",
+]
+
+
+@pytest.mark.parametrize("build", REFUSED, ids=REFUSED_IDS)
+def test_a_rubric_outside_the_rules_is_refused_at_class_definition(
+    build: Callable[[], type[Choice] | type[Levels]],
+) -> None:
+    with pytest.raises(ConfigError):
+        _ = build()
 
 
 @given(st.lists(st.text(min_size=1), min_size=2, max_size=10, unique=True))

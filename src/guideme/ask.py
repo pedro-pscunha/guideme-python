@@ -56,6 +56,10 @@ def encode(shape: object, plan: Plan) -> Claim:
             # on, and read() widens to object; no T is ever written back in.
             question = cast("Question[object]", shape)
             return Answered(plan.push(question), question)
+        # The three container arms narrow `shape` from `object` to a bare `tuple`,
+        # `list` or `dict`, whose element and key types pyright cannot know. Each
+        # cast below names them `object`, which is exactly what `encode` accepts, so
+        # none of them claims anything the arm has not already proved.
         case tuple():
             return tuple(encode(item, plan) for item in cast("tuple[object, ...]", shape))
         case list():

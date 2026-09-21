@@ -43,6 +43,7 @@ DOCUMENTED = frozenset(
 )
 
 PACKAGE = REPO_ROOT / "src" / "guideme"
+README = REPO_ROOT / "README.md"
 WIRE_ONLY = frozenset({"httpx", "pydantic"})
 
 
@@ -65,6 +66,8 @@ def test_public_surface_is_exactly_the_documented_list() -> None:
     assert set(guideme.__all__) == DOCUMENTED
     assert list(guideme.__all__) == sorted(guideme.__all__)
     assert all(hasattr(guideme, name) for name in guideme.__all__)
+    prose = README.read_text(encoding="utf-8")
+    assert not [name for name in guideme.__all__ if name not in prose]
 
 
 def test_httpx_and_pydantic_stay_behind_the_api_package() -> None:

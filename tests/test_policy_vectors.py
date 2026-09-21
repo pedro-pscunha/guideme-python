@@ -15,7 +15,11 @@ from .conftest import (
     outcome_json,
 )
 
+CONTRACT_VECTORS = 42
+"""What `docs/contract.md` pins. A vendored spec with fewer is a gap, not a smaller suite."""
+
 VECTORS = as_list(load_json(REPO_ROOT / "spec" / "vectors" / "policy.json"))
+assert len(VECTORS) == CONTRACT_VECTORS, len(VECTORS)
 
 
 @pytest.mark.parametrize("raw", VECTORS, ids=[f"v{i}" for i in range(len(VECTORS))])
