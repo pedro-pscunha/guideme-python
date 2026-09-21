@@ -3,11 +3,12 @@ import asyncio
 import dataclasses
 import json
 import socket
+import sys
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Literal, cast, final
+from typing import TYPE_CHECKING, Literal, cast, final
 
 import pytest
 from hypothesis import HealthCheck, settings
@@ -23,7 +24,7 @@ from pydantic import TypeAdapter
 from pytest_httpserver import HTTPServer
 from pytest_httpserver.httpserver import RequestHandler
 
-from guideme import ApiKey, AsyncGuide, Guide, GuideBuilder
+from guideme import ApiKey, AsyncGuide, Guide, GuideBuilder, telemetry
 from guideme._json import Json
 from guideme.api import Answer as WireAnswer
 from guideme.api import answer_from_wire
@@ -37,6 +38,9 @@ from guideme.policy import (
     ScoreOutcome,
 )
 from guideme.question import choose_among, noul, score_levels
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -385,6 +389,21 @@ class Runner:
 def runner(request: pytest.FixtureRequest, httpserver: HTTPServer) -> Runner:
     """Every wire and tracing assertion runs twice, once per kind, from this one fixture."""
     return Runner(kind=kind_of(request.param), base_url=httpserver.url_for(""))
+
+
+def without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make guideme see an `opentelemetry-api` that provides no logs API, for one test.
+
+    `None` in `sys.modules` is how CPython marks a module unimportable: the import
+    machinery raises `ImportError` on it. `resolve_logs` therefore takes the very branch a
+    release that moved `opentelemetry._logs` would put it on, so what these tests exercise
+    is the real resolution and not a stand-in for it.
+    """
+    # `sys.modules` is annotated `dict[str, ModuleType]`, and the `None` sentinel is older
+    # than that annotation; it is the documented way to block an import.
+    monkeypatch.setitem(sys.modules, telemetry.LOGS_MODULE, cast("ModuleType", None))
+    monkeypatch.setattr(telemetry, "LOGS", telemetry.resolve_logs())
+    assert telemetry.LOGS is None
 
 
 @final

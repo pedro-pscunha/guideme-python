@@ -68,6 +68,7 @@ from .conftest import (
     noul_reply,
     reply,
     validator,
+    without_the_logs_api,
 )
 
 check_request = validator("request")
@@ -557,6 +558,18 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
     _ = score_levels("How cross?", "abc")
 
 
+def _events_log_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Asking for log records where `opentelemetry-api` has no logs API is refused where
+    # it is asked for. The alternative is a guide that emits none and never says so.
+    without_the_logs_api(monkeypatch)
+    _ = GuideBuilder().api_key(ApiKey("k")).events("log")
+
+
+def _events_both_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    without_the_logs_api(monkeypatch)
+    _ = GuideBuilder().api_key(ApiKey("k")).events("both")
+
+
 @pytest.mark.parametrize(
     "build",
     [
@@ -567,6 +580,8 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
         _an_api_key_of_spaces,
         _an_empty_model,
         _levels_given_as_one_string,
+        _events_log_without_the_logs_api,
+        _events_both_without_the_logs_api,
     ],
     ids=[
         "credentialed_base_url",
@@ -576,6 +591,8 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
         "api_key_of_spaces",
         "empty_model",
         "levels_given_as_one_string",
+        "events_log_without_the_logs_api",
+        "events_both_without_the_logs_api",
     ],
 )
 def test_a_configuration_mistake_is_refused_before_a_guide_exists(

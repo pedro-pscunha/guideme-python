@@ -76,7 +76,13 @@ the rest are checked in review.
   into `Probability` and `Confidence`.
 - **Fail loudly.** An unknown answer kind, an option or level outside the rubric, a malformed
   body, bad thresholds, an empty batch, a duplicate key: each is a typed error. Never a
-  default, never a log-and-continue.
+  default, never a log-and-continue. There is exactly one deliberate exception, written as an
+  explicit `except Exception` in `telemetry.Logs._emit` so that a sweep for one finds it: an
+  OTLP log record whose sink raises is swallowed. The provider, the processor and the exporter
+  are the application's, an ask that reached its answer must return it, and a span saying the
+  ask succeeded must not be contradicted by a failure to store a log. That failure is visible
+  where it belongs, in the application's own logging pipeline. Nothing else in `src` swallows
+  anything.
 - **A rubric's text is unique, and a rubric is the caller's to get wrong once.** Two members of
   a `Choice` or a `Levels` sharing a value are aliases in Python, not two options, so a repeat
   is a `ConfigError` on the class statement; so is `fallback(…)` on a `Levels`, which has
@@ -97,6 +103,16 @@ the rest are checked in review.
   emitted inside. `events(...)` turns either signal off, and a mode that is not `span`, `log`
   or `both` is a `ConfigError`. A failure sets `error.type` and an ERROR span status; no
   ERROR-level log record is ever emitted and no exception event is ever recorded.
+- **The traces API is required; the logs API is not.** `opentelemetry-api` keeps the logs API
+  at the private `opentelemetry._logs`, and this package accepts a wide range of that
+  distribution, so `telemetry.resolve_logs` imports it defensively and its absence is a value.
+  A release that moves it must cost the logs signal and nothing else: `import guideme` still
+  works, the traces signal is untouched, and `events("span")` still routes every answer and
+  retry. Asking for the signal that is not there, `events("log")` or `events("both")`, is a
+  `ConfigError` naming the version and both ways out. The default `"both"` is not such an ask,
+  so it degrades to the span alone, which is all an application without the logs API could have
+  exported anyway. `latest-deps` in CI resolves the range unpinned so a move is seen early; it
+  is deliberately not a required check, because a third party's release must not block a merge.
 - **The library installs nothing.** No tracer provider, no logger provider, no exporter, no
   logging handler.
 - **Every public item has a docstring** (`ruff`'s `D` rules, Google style). A `Choice` or
@@ -121,10 +137,13 @@ is made in `guideme-rust` first, not here.
 
 ## Tests
 
-Few tests, high grade. The ceiling is 42 test functions; a parametrised function counts once.
+Few tests, high grade. The ceiling is 43 test functions; a parametrised function counts once.
 It was 40 before the logs signal, which is user-requested scope that the span assertions could
-not cover: correlation, severity and routing each need a record to look at. A new test must be
-one of:
+not cover: correlation, severity and routing each need a record to look at. The forty-third is
+the pre-publish proof that a log sink which raises reaches neither the caller nor the ask span:
+it asserts the absence of a failure on a path where every other test asserts a presence, so no
+existing test could carry it. Everything else that pass added went into a parameter of a test
+that was already there. A new test must be one of:
 
 - a property test (`hypothesis`) over a law of `policy.resolve`, the shapes, or the wire types;
 - a wire or contract check through a real local HTTP server (`pytest-httpserver`), asserting on
@@ -158,6 +177,7 @@ CI holds no key and never runs them.
 ```
 mise run sync        # install the locked environment
 mise run check       # the gate: fmt-check, gen-check, ruff, pyright, pylint, pytest, build, audit
+mise run build       # sdist + wheel, twine check, and the sdist carries docs, examples, tests
 mise run test        # pytest only
 mise run lint        # ruff only
 mise run types       # pyright only
@@ -173,9 +193,12 @@ through `tail`.
 
 - Branch from `main`, open a pull request, squash-merge. `main` takes pull requests only: a
   GitHub ruleset requires every CI check to pass and refuses direct pushes.
-- CI (`.github/workflows/ci.yml`) runs the same gate on Python 3.12 and 3.14, scans the whole
-  history with `gitleaks`, lints and type-checks `examples/otlp`, proves the 3.12.0 floor, and
-  checks `spec/` against `guideme-rust`. `advisories.yml` re-audits the unchanged lock file
+- CI (`.github/workflows/ci.yml`) runs the same gate on Python 3.12 and 3.14, installs the
+  wheel it built into an empty environment and imports it, scans the whole history with
+  `gitleaks`, lints and type-checks `examples/otlp`, proves the 3.12.0 floor, resolves the
+  dependency ranges unpinned in `latest-deps`, and checks `spec/` against `guideme-rust`.
+  `latest-deps` is the one job that is not a required check. `advisories.yml` re-audits the
+  unchanged lock file
   weekly and `spec-drift.yml` re-checks the contract weekly. `.github/dependabot.yml` is what
   moves the SHA-pinned actions and the pinned tools forward. CI holds no secrets.
 - The hooks are tracked in `.githooks/` and do nothing until you run `mise run hooks`, which

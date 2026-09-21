@@ -296,6 +296,11 @@ a different backend.
   docker run --rm -d --name lgtm -p 3000:3000 -p 4317:4317 -p 4318:4318 grafana/otel-lgtm
   ```
 
+  Both pipelines run here, so the default `events("both")` stores every answer twice: once
+  as a span event in Tempo and once as a record in Loki. Set
+  [`events("log")`](#choosing-a-signal) against this one — the record carries the same
+  attributes as the event and its trace and span ids take you to the span.
+
 - **A vendor.** Set `OTEL_EXPORTER_OTLP_ENDPOINT` to their OTLP endpoint and put the API key
   in `OTEL_EXPORTER_OTLP_HEADERS`; their documentation names the header. Products with an
   LLM observability view pick the ask span up as a model call through its `gen_ai.*`

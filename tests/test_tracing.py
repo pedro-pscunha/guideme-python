@@ -1,13 +1,13 @@
 import json
-from dataclasses import dataclass
-from typing import final
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, cast, final
 
 import pytest
 from opentelemetry._logs import SeverityNumber
 from opentelemetry.trace import SpanKind, StatusCode
 from pytest_httpserver import HTTPServer
 
-from guideme import AuthError, Policy
+from guideme import AuthError, Policy, telemetry
 from guideme.api.client import EVALUATE
 from guideme.question import noul
 from guideme.telemetry import ANSWER_EVENT, ASK_SPAN, OPERATION, PROVIDER, RETRY_EVENT, Events
@@ -27,7 +27,11 @@ from .conftest import (
     log_scope,
     noul_reply,
     reply,
+    without_the_logs_api,
 )
+
+if TYPE_CHECKING:
+    from opentelemetry._logs import Logger
 
 ATTEMPT_SPAN = f"POST {EVALUATE}"
 UNAUTHORIZED = "unauthorized: missing or invalid TypeSafe API key"
@@ -256,19 +260,36 @@ class Route:
     mode: Events
     on_spans: bool
     as_records: bool
+    logs_api: bool = True
+    """Whether this run has an `opentelemetry-api` that provides a logs API at all."""
 
 
 ROUTES = [
     Route(mode="span", on_spans=True, as_records=False),
     Route(mode="log", on_spans=False, as_records=True),
     Route(mode="both", on_spans=True, as_records=True),
+    # The logs API is private, `opentelemetry-api` is depended on across a wide range, and
+    # a release that moved it must cost the logs signal and nothing else. `events("log")`
+    # and `events("both")` are refused on the builder instead; those two are in
+    # tests/test_wire.py, because nothing gets as far as a span.
+    Route(mode="span", on_spans=True, as_records=False, logs_api=False),
 ]
 
+ROUTE_IDS = ["span", "log", "both", "span_without_the_logs_api"]
 
-@pytest.mark.parametrize("route", ROUTES, ids=[route.mode for route in ROUTES])
+
+@pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
 def test_the_events_mode_decides_which_signal_carries_each_event(
-    httpserver: HTTPServer, runner: Runner, spans: Recorded, records: Logged, route: Route
+    httpserver: HTTPServer,
+    runner: Runner,
+    spans: Recorded,
+    records: Logged,
+    monkeypatch: pytest.MonkeyPatch,
+    route: Route,
 ) -> None:
+    if not route.logs_api:
+        without_the_logs_api(monkeypatch)
+
     httpserver.expect_oneshot_request(EVALUATE, method="POST").respond_with_data(
         "", status=429, headers={"retry-after": "0"}
     )
@@ -278,7 +299,48 @@ def test_the_events_mode_decides_which_signal_carries_each_event(
 
     ask = spans.one(ASK_SPAN)
     throttled = spans.named(ATTEMPT_SPAN)[0]
+    assert ask.status.status_code is StatusCode.UNSET
     assert bool(spans.events(ask, ANSWER_EVENT)) is route.on_spans
     assert bool(spans.events(throttled, RETRY_EVENT)) is route.on_spans
     assert bool(records.named(ANSWER_EVENT)) is route.as_records
     assert bool(records.named(RETRY_EVENT)) is route.as_records
+
+
+BOOM = "the log exporter is down"
+
+
+@final
+class Exploding:
+    """An OpenTelemetry logger whose sink fails, the way a dead exporter does.
+
+    The application owns the provider, the processor and the exporter; this stands in for
+    all three, and everything between it and `Guide.ask` is the real code path.
+    """
+
+    def emit(self, record: object) -> None:  # noqa: ARG002 -- the sink never reads it
+        """Fail on the call that hands the record over, which is where an exporter fails."""
+        raise RuntimeError(BOOM)
+
+
+def test_a_log_sink_that_fails_reaches_neither_the_caller_nor_the_ask_span(
+    httpserver: HTTPServer, runner: Runner, spans: Recorded, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installed = telemetry.LOGS
+    assert installed is not None
+    # `Exploding` satisfies the `Logger` protocol for the one call guideme makes of it.
+    sink = cast("Logger", Exploding())
+    monkeypatch.setattr(telemetry, "LOGS", replace(installed, answers=sink, retries=sink))
+
+    httpserver.expect_oneshot_request(EVALUATE, method="POST").respond_with_data(
+        "", status=429, headers={"retry-after": "0"}
+    )
+    expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
+
+    assert runner.ask(noul("Urgent?"), TICKET) is True
+
+    ask = spans.one(ASK_SPAN)
+    assert ask.status.status_code is StatusCode.UNSET
+    assert "error.type" not in attributes(ask)
+    assert len(spans.events(ask, ANSWER_EVENT)) == 1
+    assert len(spans.events(spans.named(ATTEMPT_SPAN)[0], RETRY_EVENT)) == 1
+    assert not [text for text in spans.texts() if BOOM in text]
