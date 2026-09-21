@@ -24,7 +24,7 @@ class Frustration(Levels):
     very_angry = "Very angry"
 
 
-guide = Guide.from_env()  # reads TYPESAFE_API_KEY
+guide = Guide.from_env()
 
 if guide.ask(noul("Should this ticket be escalated?"), ticket):
     escalate()
@@ -35,16 +35,22 @@ match guide.ask(choose(Department, "Which team should handle this?"), ticket):
     case Department.technical:
         route_tech()
     case Department.sales:
-        route_sales()  # also the answer when confidence is below the floor
+        route_sales()
 
-mood = guide.ask(score(Frustration, "How frustrated is the customer?"), ticket)
-if mood >= Frustration.frustrated:
+if guide.ask(score(Frustration, "How frustrated is the customer?"), ticket) >= (
+    Frustration.frustrated
+):
     prioritise()
 ```
 
 The value of each member is the rubric the model reads. The member's name is the wire key. A
 docstring on a member is documentation, not a rubric. pyright in strict mode enforces that
-every option is handled.
+every option is handled, so adding a department turns the `match` above into an error until
+you handle it. `from_env()` reads `TYPESAFE_API_KEY`, and `sales`, marked with `fallback(…)`,
+is also the answer when confidence is below the floor.
+
+That example is `tests/typing/readme.py`, which the gate type-checks with an `assert_type`
+after every `ask`, so what is on this page cannot drift from what the package infers.
 
 ## Install
 
@@ -156,15 +162,12 @@ list or dict, which is the shape above.
 `await` and the `httpx` client underneath.
 
 ```python
-guide = Guide.from_env()
-urgent = guide.ask(noul("Is this urgent?"), ticket)
-
-
-async def is_urgent(ticket: str) -> bool:
-    aguide = AsyncGuide.from_env()
-    return await aguide.ask(noul("Is this urgent?"), ticket)
+guide = AsyncGuide.from_env()
+verdict: Verdict = await guide.ask(noul("Is this about billing?").detail(), ticket)
+await guide.close()
 ```
 
+The synchronous version is the same three lines with `Guide` and without the `await`s.
 `Guide.builder()` and `AsyncGuide.builder()` return the same `GuideBuilder`; `.build()` gives
 the synchronous guide and `.build_async()` the asynchronous one.
 
