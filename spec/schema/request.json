@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Request",
+  "description": "The request body.",
+  "type": "object",
+  "properties": {
+    "model": {
+      "description": "Which model answers.",
+      "$ref": "#/$defs/Model"
+    },
+    "questions": {
+      "description": "Questions keyed by ids you choose.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Question"
+      }
+    },
+    "state": {
+      "description": "What to evaluate.",
+      "$ref": "#/$defs/State"
+    }
+  },
+  "required": [
+    "state",
+    "model",
+    "questions"
+  ],
+  "$defs": {
+    "Instructions": {
+      "description": "The question text, or a structured object holding the question plus data it references."
+    },
+    "Model": {
+      "description": "A model name or alias accepted by the `model` field.",
+      "type": "string"
+    },
+    "NoulCriteria": {
+      "description": "Optional descriptions of what a yes and a no mean for a noul question.",
+      "type": "object",
+      "properties": {
+        "false": {
+          "description": "What a no (value near 0) means.",
+          "type": "string"
+        },
+        "true": {
+          "description": "What a yes (value near 1) means.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "true",
+        "false"
+      ]
+    },
+    "Question": {
+      "description": "One typed question. The `type` tag selects the variant on the wire.",
+      "oneOf": [
+        {
+          "description": "Yes/no; the answer is the probability of yes.",
+          "type": "object",
+          "properties": {
+            "criteria": {
+              "description": "Optional yes/no descriptions.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NoulCriteria"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "instructions": {
+              "description": "The question.",
+              "$ref": "#/$defs/Instructions"
+            },
+            "type": {
+              "type": "string",
+              "const": "noul"
+            }
+          },
+          "required": [
+            "type",
+            "instructions"
+          ]
+        },
+        {
+          "description": "Pick one option; `criteria` maps option key to rubric (or `null`). Max 255.",
+          "type": "object",
+          "properties": {
+            "criteria": {
+              "description": "Option key → rubric.",
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "instructions": {
+              "description": "The question.",
+              "$ref": "#/$defs/Instructions"
+            },
+            "type": {
+              "type": "string",
+              "const": "choice"
+            }
+          },
+          "required": [
+            "type",
+            "instructions",
+            "criteria"
+          ]
+        },
+        {
+          "description": "Rate along ordered levels, low to high. 2..=10 levels.",
+          "type": "object",
+          "properties": {
+            "criteria": {
+              "description": "Level descriptions, low to high.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "instructions": {
+              "description": "The question.",
+              "$ref": "#/$defs/Instructions"
+            },
+            "type": {
+              "type": "string",
+              "const": "score"
+            }
+          },
+          "required": [
+            "type",
+            "instructions",
+            "criteria"
+          ]
+        }
+      ]
+    },
+    "State": true
+  }
+}

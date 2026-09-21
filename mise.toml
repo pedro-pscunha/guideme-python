@@ -61,12 +61,16 @@ run = [
 
 [tasks.spec-check]
 description = "Fail if spec/ differs from guideme-rust main"
+# spec/SOURCE is provenance -- the guideme-rust commit this copy was taken
+# from -- and has no counterpart upstream, so it is the one path excluded from
+# the content diff. Everything else must match main exactly: the contract lives
+# there, and a local edit to it is the failure this task exists to catch.
 run = '''
 set -euo pipefail
 tmp="$(mktemp -d)"
 git clone --quiet --depth 1 https://github.com/pedro-pscunha/guideme-rust "$tmp/rust"
-echo "vendored from $(cat spec/SOURCE); main is $(git -C "$tmp/rust" rev-parse HEAD)"
-diff -ru "$tmp/rust/spec" spec
+echo "vendored from $(cat spec/SOURCE); guideme-rust main is $(git -C "$tmp/rust" rev-parse HEAD)"
+diff -ru -x SOURCE "$tmp/rust/spec" spec
 echo "spec/ matches guideme-rust main"
 '''
 

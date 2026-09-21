@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Response",
+  "description": "The response body.",
+  "type": "object",
+  "properties": {
+    "answers": {
+      "description": "One answer per question, same ids.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Answer"
+      }
+    },
+    "model": {
+      "description": "The versioned model that answered (e.g. `jev-1.13.0`), even when an alias was requested.",
+      "$ref": "#/$defs/Model"
+    },
+    "usage": {
+      "description": "Token usage.",
+      "$ref": "#/$defs/Usage"
+    }
+  },
+  "required": [
+    "model",
+    "answers",
+    "usage"
+  ],
+  "$defs": {
+    "Answer": {
+      "description": "One typed answer. The `type` tag matches the question's.",
+      "oneOf": [
+        {
+          "description": "Probability of yes.",
+          "type": "object",
+          "properties": {
+            "noul": {
+              "description": "`0` is no, `1` is yes.",
+              "$ref": "#/$defs/Probability"
+            },
+            "type": {
+              "type": "string",
+              "const": "noul"
+            }
+          },
+          "required": [
+            "type",
+            "noul"
+          ]
+        },
+        {
+          "description": "The chosen option with the full distribution.",
+          "type": "object",
+          "properties": {
+            "choice": {
+              "description": "Highest-probability option.",
+              "type": "string"
+            },
+            "confidence": {
+              "description": "Derived from the distribution.",
+              "$ref": "#/$defs/Confidence"
+            },
+            "probabilities": {
+              "description": "Every option → probability; sums to 1.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/Probability"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "choice"
+            }
+          },
+          "required": [
+            "type",
+            "choice",
+            "probabilities",
+            "confidence"
+          ]
+        },
+        {
+          "description": "Probability-weighted position on the levels.",
+          "type": "object",
+          "properties": {
+            "confidence": {
+              "description": "Derived from the distribution.",
+              "$ref": "#/$defs/Confidence"
+            },
+            "legend": {
+              "description": "Level index → description.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "probabilities": {
+              "description": "Level index → probability; sums to 1.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/Probability"
+              }
+            },
+            "score": {
+              "description": "Expected value; may land between levels.",
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "score"
+            }
+          },
+          "required": [
+            "type",
+            "score",
+            "legend",
+            "probabilities",
+            "confidence"
+          ]
+        }
+      ]
+    },
+    "Confidence": {
+      "description": "confidence in the closed unit interval",
+      "type": "number",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "Model": {
+      "description": "A model name or alias accepted by the `model` field.",
+      "type": "string"
+    },
+    "Probability": {
+      "description": "probability in the closed unit interval",
+      "type": "number",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "Usage": {
+      "description": "Token usage for one request. Input tokens are billed; output tokens are free.",
+      "type": "object",
+      "properties": {
+        "input_tokens": {
+          "description": "Tokens read.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "description": "Tokens written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens"
+      ]
+    }
+  }
+}
