@@ -139,17 +139,21 @@ class Logs:
         must still return it, and a span that says the ask succeeded must not be
         contradicted by a logging failure. The failure belongs to the application's own
         logging pipeline, which is where it is visible.
+
+        The record is built outside that guard so the swallow covers only what the
+        docstring scopes it to. A `LogRecord` this package cannot construct is not a
+        sink failure, it is the private API having moved, and it is caught once in
+        `resolve_logs` where absence is representable and says so loudly.
         """
+        record = self.build(
+            event_name=name,
+            severity_text=severity.name,
+            severity_number=severity,
+            body=body,
+            attributes=attributes,
+        )
         try:  # noqa: SIM105 -- an explicit `except Exception` is what AGENTS.md audits for
-            logger.emit(
-                self.build(
-                    event_name=name,
-                    severity_text=severity.name,
-                    severity_number=severity,
-                    body=body,
-                    attributes=attributes,
-                )
-            )
+            logger.emit(record)
         except Exception:  # noqa: BLE001, S110 -- a sink's failure is not the ask's  # pylint: disable=broad-exception-caught
             pass
 
@@ -160,8 +164,16 @@ def resolve_logs() -> Logs | None:
     The logs API is private. `opentelemetry-api` keeps it at `opentelemetry._logs` with no
     public alias, and this package depends on a range wide enough for a future release to
     move it. Imported at module scope, such a release would break `import guideme` outright
-    for every user, traces included; imported here, it costs the logs signal alone. Only
-    `ImportError` is caught, so anything else that package raises is still a failure.
+    for every user, traces included; imported here, it costs the logs signal alone.
+
+    Everything this package needs from that API is reached inside the one guard, because
+    the promise is about the signal and not about the import: a release that keeps the
+    module and moves what is in it must cost no more than a release that deletes it.
+    Three failures are expected and each is the same fact, that this `opentelemetry-api`
+    provides no logs API guideme can use. `ImportError` is the module or a name being
+    gone; `AttributeError` is a severity member renamed; `TypeError` is `get_logger` or
+    `LogRecord` taking different arguments. Anything else that package raises is still a
+    failure and still propagates.
     """
     # pylint: disable=import-outside-toplevel; the one import here is deferred on purpose
     try:
@@ -170,16 +182,25 @@ def resolve_logs() -> Logs | None:
             SeverityNumber,
             get_logger,
         )
-    except ImportError:
+
+        info = SeverityNumber.INFO
+        warn = SeverityNumber.WARN
+        # `get_logger` takes the version as a string, where `get_tracer` takes an optional one.
+        answers = get_logger("guideme", _VERSION or "")
+        retries = get_logger("guideme.api", _VERSION or "")
+        # One throwaway record, built with exactly the five keywords `Logs._emit` uses, so a
+        # constructor that no longer takes them is found here rather than at the first emit.
+        # `_emit` swallows a sink that raises; it must never be what hides this.
+        _ = LogRecord(
+            event_name=ANSWER_EVENT,
+            severity_text=info.name,
+            severity_number=info,
+            body="",
+            attributes={},
+        )
+    except (ImportError, AttributeError, TypeError):
         return None
-    # `get_logger` takes the version as a string, where `get_tracer` takes an optional one.
-    return Logs(
-        answers=get_logger("guideme", _VERSION or ""),
-        retries=get_logger("guideme.api", _VERSION or ""),
-        build=LogRecord,
-        info=SeverityNumber.INFO,
-        warn=SeverityNumber.WARN,
-    )
+    return Logs(answers=answers, retries=retries, build=LogRecord, info=info, warn=warn)
 
 
 LOGS = resolve_logs()
