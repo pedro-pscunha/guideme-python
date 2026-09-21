@@ -1,11 +1,20 @@
 name: Release
 
-# A tag is the only trigger. Pushing v1.2.3 publishes 1.2.3 to PyPI, so the tag
-# goes on a commit whose gate is already green, and the tag ruleset refuses to
-# let it move afterwards.
+# A tag is the only trigger that publishes. Pushing v1.2.3 publishes 1.2.3 to
+# PyPI, so the tag goes on a commit whose gate is already green, and the tag
+# ruleset refuses to let it move afterwards.
+#
+# workflow_dispatch is a dry run, and it exists because the tag is immutable: a
+# workflow that has never executed gets its first try on the one event nobody
+# can take back. A dispatched run does `build`, which is the gate and `uv build`,
+# and stops there. It CANNOT publish: `publish` is gated on
+# `github.event_name == 'push'`, which is a fact about how the run started, not
+# an input, a branch or a variable anyone can set, and a re-run keeps the event
+# it was created with.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,8 +39,10 @@ jobs:
       # The tag names the version that reaches PyPI, and a published version is
       # permanent, so a tag that disagrees with pyproject.toml stops here rather
       # than publishing a number nobody meant. Checked before the gate, which is
-      # the slow part.
+      # the slow part. On a dispatched run GITHUB_REF_NAME is a branch and there
+      # is nothing to publish, so there is nothing for it to check.
       - name: the tag matches the project version
+        if: github.event_name == 'push'
         run: |
           version="v$(uv version --short --no-sync)"
           if [ "${version}" != "${GITHUB_REF_NAME}" ]; then
@@ -62,9 +73,14 @@ jobs:
   # upload token, so the repository holds no PyPI credential of any kind. PyPI
   # checks the owner, the repository, this workflow's file name and the
   # environment, so all four are part of the contract; AGENTS.md has the values.
+  #
+  # A tag push is the only event that reaches this job. A dispatched run finishes
+  # at `build` with the archives uploaded as a workflow artifact and nothing sent
+  # anywhere, which is the whole point of being able to dispatch it.
   publish:
     name: publish
     needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: pypi

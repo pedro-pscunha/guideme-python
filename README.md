@@ -57,8 +57,10 @@ short. `fallback(…)` marks a `Choice` member and only a `Choice` member; a `Le
 ordered, so the level to fall back to when a score is unsure is `.otherwise(level)` on the
 question.
 
-That example is `tests/typing/readme.py`, which the gate type-checks with an `assert_type`
-after every `ask`, so what is on this page cannot drift from what the package infers.
+That example is `tests/typing/readme.py`, which the gate type-checks with an `assert_type` on
+every inferred answer type, so what is on this page cannot drift from what the package infers.
+The three asks above are held to it by their use sites instead: the `match` is exhaustive and
+the `>=` is between two levels of one scale.
 
 ## Install
 
@@ -108,7 +110,9 @@ through `dataclasses.asdict`, a pydantic model through `.model_dump()`.
 ## Policy
 
 Thresholds decide how a probability or a confidence becomes an answer. They form a patch that
-merges from the question, over the guide, over the package defaults.
+merges from the question, over the guide, over the package defaults. A `Policy` is that patch,
+with every field optional; settling one against the defaults gives a `Thresholds`, which is
+what `guideme.policy.resolve` takes and what every golden vector is written against.
 
 | Layer | How to set | Wins over |
 |---|---|---|
@@ -197,14 +201,21 @@ the synchronous guide and `.build_async()` the asynchronous one.
 
 Both guides also answer `models()`, which returns a `tuple[ModelInfo, ...]`: the models the
 account may use, each with its `name`, `description` and `release_date`. It is one call to
-`GET /v1/models` and gets no ask span of its own.
+`GET /v1/models` and gets no ask span of its own. Unlike `ask`, it is not retried: a `429` or a
+`529` raises on the first attempt, so the two rows below that mention retries do not apply to it.
 
 ## Observability
 
 guideme emits OpenTelemetry spans, span events and OTLP log records through
 `opentelemetry-api` and installs nothing: no tracer provider, no logger provider, no exporter,
-no logging handler. Install a provider and the data appears. The smallest one that leaves the
-process:
+no logging handler. Install a provider and the data appears. The SDK and an exporter are not
+dependencies of this package, so install them alongside it:
+
+```sh
+pip install opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc
+```
+
+The smallest provider that leaves the process:
 
 ```python
 from opentelemetry import trace
@@ -230,7 +241,9 @@ Every answer and every retry is also an OTLP log record, at `INFO` and at `WARN`
 trace id and the span id of the span it came from, so a logs backend links one straight back to
 the decision it explains. Install a `LoggerProvider` too and they arrive; install neither and
 they cost nothing. `events(...)` on the builder picks which signal carries an event when you
-export both; **Choosing a signal** in the observability document has the table and the default.
+export both; **Choosing a signal** in the observability document has the table, the default, and
+what happens on an `opentelemetry-api` that has no logs API: asking for one is refused, and the
+default falls back to the span event alone.
 
 Because the shapes are standard, any OTLP backend reads them as is.
 [`docs/observability.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/observability.md)
@@ -261,15 +274,22 @@ Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and 
 ## Lower layers
 
 Everything above is re-exported from the `guideme` package, and `guideme.__all__` is that list.
-The two modules below are a second supported tier: you import them by their own path, they are
-not re-exported at the top level, and they are under the same rule as the first tier — nothing
-in them is removed or renamed without a major version and a `CHANGELOG.md` entry. Anything else
-in the package is private, whatever its name looks like.
+The three modules below are a second supported tier: you import them by their own path, they
+are not re-exported at the top level, and they are under the same rule as the first tier —
+nothing in them is removed or renamed without a major version and a `CHANGELOG.md` entry.
+Anything else in the package is private, whatever its name looks like.
 
 - `guideme.api` is the exact wire mirror of `POST /v1/systemone` and `GET /v1/models`.
   `guideme.api.client` holds `Client` and `AsyncClient` for callers who want to build requests
   themselves. They live one level down rather than on `guideme.api` because re-exporting them
   would make `api` and `api.client` import each other, and the gate fails an import cycle.
+- `guideme.question.Question` is the type `noul`, `choose`, `choose_among`, `score`,
+  `score_levels` and every `.detail()` return. Inference covers most uses, so import it when
+  you need to annotate a question you are storing or passing on: a `dict` is invariant, so a
+  `dict[str, NoulQuestion]` is not a `dict[str, Question[bool]]` and the annotation has to be
+  written. It is out of `__all__` because the top-level surface is a fixed list, not because
+  the type is private. The promise covers that one name: everything else in `guideme.question`
+  is private.
 - The scalars are validated once and never re-checked: `Probability` and `Confidence` hold the
   unit-interval numbers on `Verdict`, `Ranked` and `Scored`, `Key` and `Rank` are what a runtime
   rubric answers with, `Model` names the model to ask, and `ApiKey` carries the key without ever
@@ -331,6 +351,9 @@ selected, and `pylint` with every check enabled. Tests are few and high-grade: p
 for the policy laws, a real local HTTP server for the wire and retry contract, structural
 tracing assertions, pyright files that must fail, and a drift guard that re-resolves every
 golden vector.
+
+From a source distribution rather than a clone, `mise.toml` and `uv.lock` are not present, so
+the suite runs with `uv run --group dev pytest`.
 
 Two opt-in tests hit the real API and are deselected by default:
 

@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import final
+from typing import cast, final
 
 import pytest
 from hypothesis import given
@@ -44,7 +44,7 @@ from guideme.api.client import EVALUATE, MODELS
 from guideme.ask import Plan, encode
 from guideme.guide import KEY_VAR, ModelInfo
 from guideme.question import Question, choose_among, noul, score_levels
-from guideme.telemetry import ASK_SPAN
+from guideme.telemetry import ASK_SPAN, Events
 
 from .conftest import (
     FIXTURES,
@@ -68,6 +68,7 @@ from .conftest import (
     noul_reply,
     reply,
     validator,
+    with_a_drifted_log_record,
     without_the_logs_api,
 )
 
@@ -570,6 +571,22 @@ def _events_both_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
     _ = GuideBuilder().api_key(ApiKey("k")).events("both")
 
 
+def _events_log_with_a_drifted_log_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The logs API is there and its `LogRecord` no longer takes `event_name`. Every record
+    # guideme would build is unbuildable, so the signal is absent and saying so is the only
+    # honest answer; the alternative is an ask that emits nothing and never mentions it.
+    with_a_drifted_log_record(monkeypatch)
+    _ = GuideBuilder().api_key(ApiKey("k")).events("log")
+
+
+def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # `Events` is a Literal, so a checker refuses this at the call. The cast is how the
+    # test reaches the runtime guard behind it, which is what a caller with no type
+    # checker meets, and the only thing standing between them and a silent no-op.
+    unknown: Events = cast("Events", "spans")
+    _ = GuideBuilder().api_key(ApiKey("k")).events(unknown)
+
+
 @pytest.mark.parametrize(
     "build",
     [
@@ -582,6 +599,8 @@ def _events_both_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
         _levels_given_as_one_string,
         _events_log_without_the_logs_api,
         _events_both_without_the_logs_api,
+        _events_log_with_a_drifted_log_record,
+        _events_given_an_unknown_mode,
     ],
     ids=[
         "credentialed_base_url",
@@ -593,6 +612,8 @@ def _events_both_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
         "levels_given_as_one_string",
         "events_log_without_the_logs_api",
         "events_both_without_the_logs_api",
+        "events_log_with_a_drifted_log_record",
+        "events_given_an_unknown_mode",
     ],
 )
 def test_a_configuration_mistake_is_refused_before_a_guide_exists(
@@ -607,28 +628,60 @@ def test_a_configuration_mistake_is_refused_before_a_guide_exists(
 
 
 ELSEWHERE = "/v1/systemone-elsewhere"
-"""Where the redirect case points. Same origin, so `httpx` keeps the bearer on the hop."""
+"""Where a redirect case points, on whichever origin that case sends it to."""
 
 
-def _served_directly(httpserver: HTTPServer, body: str) -> None:
+@final
+@dataclass(frozen=True, slots=True)
+class Landed:
+    """Where the POST that carried the questions ended up, and what it should have carried."""
+
+    server: HTTPServer
+    """Whose log holds the final request: the first origin, or the one it was sent on to."""
+
+    first: int
+    """Requests the first origin served, so a redirect that never happened fails here."""
+
+    bearer: bool
+    """Whether the key should have survived the hop."""
+
+
+type Arrange = Callable[[HTTPServer, HTTPServer, str], Landed]
+"""How one case sets up the two origins, returning where the questions landed."""
+
+
+def _served_directly(httpserver: HTTPServer, _other: HTTPServer, body: str) -> Landed:
     expect_post(httpserver).respond_with_data(body, content_type=JSON)
+    return Landed(server=httpserver, first=1, bearer=True)
 
 
-def _served_after_a_redirect(httpserver: HTTPServer, body: str) -> None:
+def _served_after_a_redirect(httpserver: HTTPServer, _other: HTTPServer, body: str) -> Landed:
     expect_post(httpserver).respond_with_data("", status=307, headers={"location": ELSEWHERE})
     httpserver.expect_request(ELSEWHERE, method="POST").respond_with_data(body, content_type=JSON)
+    return Landed(server=httpserver, first=2, bearer=True)
+
+
+def _redirected_off_the_origin(httpserver: HTTPServer, other: HTTPServer, body: str) -> Landed:
+    # The second server is on its own port, so the hop changes the origin and httpx drops
+    # the authorization header rather than handing the key to a host guideme was not
+    # configured for. Its one carve-out is a direct same-host http -> https upgrade, which
+    # keeps the header deliberately; a different port is not that case.
+    away = other.url_for(ELSEWHERE)
+    expect_post(httpserver).respond_with_data("", status=307, headers={"location": away})
+    other.expect_request(ELSEWHERE, method="POST").respond_with_data(body, content_type=JSON)
+    return Landed(server=other, first=1, bearer=False)
 
 
 @pytest.mark.parametrize(
-    ("arrange", "served"),
-    [(_served_directly, 1), (_served_after_a_redirect, 2)],
-    ids=["direct", "after_a_307"],
+    "arrange",
+    [_served_directly, _served_after_a_redirect, _redirected_off_the_origin],
+    ids=["direct", "after_a_307", "after_a_307_off_the_origin"],
 )
 def test_the_request_carries_the_bearer_token_and_matches_the_schema(
     httpserver: HTTPServer,
+    other_httpserver: HTTPServer,
     runner: Runner,
-    arrange: Callable[[HTTPServer, str], None],
-    served: int,
+    arrange: Arrange,
 ) -> None:
     answers: dict[str, Json] = {
         "q0": {"type": "noul", "noul": 0.95},
@@ -646,17 +699,21 @@ def test_the_request_carries_the_bearer_token_and_matches_the_schema(
             "confidence": 0.92,
         },
     }
-    arrange(httpserver, reply(answers))
+    landed = arrange(httpserver, other_httpserver, reply(answers))
     batch = (
         noul("Urgent?").criteria("needs a person now", "can wait"),
         choose_among("Which team?", {"billing": "Money", "sales": None}),
         score_levels("How cross?", ["Calm", "Cross"]),
     )
     assert runner.ask(batch, TICKET) == (True, Key("billing"), Rank(1))
-    assert len(httpserver.log) == served
+    assert len(httpserver.log) == landed.first
 
-    request, _ = httpserver.log[-1]
-    assert request.headers["authorization"] == f"Bearer {TEST_KEY}"
+    request, _ = landed.server.log[-1]
+    if landed.bearer:
+        assert request.headers["authorization"] == f"Bearer {TEST_KEY}"
+    else:
+        assert "authorization" not in request.headers
+        assert not [value for value in request.headers.values() if TEST_KEY in value]
     assert request.headers["content-type"] == JSON
     body = as_object(narrow(request.get_json()))
     check_request(body)

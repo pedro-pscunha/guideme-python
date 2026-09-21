@@ -14,7 +14,7 @@ import pytest
 from hypothesis import HealthCheck, settings
 from jsonschema import Draft202012Validator
 from opentelemetry import trace
-from opentelemetry._logs import set_logger_provider
+from opentelemetry._logs import LogRecord, set_logger_provider
 from opentelemetry.sdk._logs import LoggerProvider, ReadableLogRecord
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
 from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
@@ -404,6 +404,46 @@ def without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, telemetry.LOGS_MODULE, cast("ModuleType", None))
     monkeypatch.setattr(telemetry, "LOGS", telemetry.resolve_logs())
     assert telemetry.LOGS is None
+
+
+@final
+class DriftedLogRecord(LogRecord):
+    """A `LogRecord` from a release that stopped taking `event_name`.
+
+    The module still imports and every name is still there; only the constructor moved.
+    That is the shape of drift `ImportError` cannot see.
+    """
+
+    def __init__(self, **fields: object) -> None:
+        if "event_name" in fields:
+            message = "LogRecord.__init__() got an unexpected keyword argument 'event_name'"
+            raise TypeError(message)
+        super().__init__()
+
+
+def with_a_drifted_log_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make guideme see an `opentelemetry-api` whose `LogRecord` it cannot build, for one test.
+
+    `resolve_logs` imports the name off the module every call, so replacing the attribute
+    is what a release moving the constructor would look like from inside this package. The
+    signal has to go absent here: a record guideme cannot construct reaches no exporter,
+    and `Logs._emit` must not be the thing that discovers it.
+    """
+    monkeypatch.setattr(f"{telemetry.LOGS_MODULE}.LogRecord", DriftedLogRecord)
+    monkeypatch.setattr(telemetry, "LOGS", telemetry.resolve_logs())
+    assert telemetry.LOGS is None
+
+
+@pytest.fixture
+def other_httpserver() -> Iterator[HTTPServer]:
+    """A second local server, on its own port, so a redirect can leave the first origin."""
+    server = HTTPServer(host="127.0.0.1", port=0)
+    server.start()
+    try:
+        yield server
+    finally:
+        server.clear()
+        server.stop()
 
 
 @final

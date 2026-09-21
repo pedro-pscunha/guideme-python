@@ -157,6 +157,12 @@ provider installed the record goes to OpenTelemetry's no-op logger. Set `"span"`
 once both pipelines are running and you would rather store and read each event once.
 Anything else is a `ConfigError` where the builder is written.
 
+`"log"` and `"both"` need the OpenTelemetry logs API, and this package accepts a range of
+`opentelemetry-api` wide enough not to guarantee it. Where it is missing, asking for either is
+a `ConfigError` naming the installed version and both ways out. The default `"both"` is not an
+ask, so it does not raise: it degrades to the span event alone, and an application without the
+logs API could not have installed a logger provider to receive records anyway.
+
 ### Errors
 
 guideme records no exception event and emits no log record at `ERROR`. A failure is raised
@@ -167,8 +173,12 @@ Both spans are started with `record_exception=False` and `set_status_on_exceptio
 that nothing is recorded behind guideme's back.
 
 `error.type` values on the ask span: `auth`, `invalid`, `rate_limited`, `overloaded`,
-`transport`, `unexpected_status`, `protocol`, `unsure`, `config`. On an HTTP span it is the
-status code as text when a response arrived, otherwise one of those names.
+`transport`, `unexpected_status`, `protocol`, `unsure`. On an HTTP span it is the status code
+as text when a response arrived, otherwise one of those names.
+
+`config` is the one kind that never reaches a span. The request is planned before the span is
+opened, so a `ConfigError` is raised while there is nothing to mark, and an alert keyed on
+`error.type=config` over `guideme.ask` would never fire.
 
 The status description is the error's message, except for `invalid` and
 `unexpected_status`: those errors carry the verbatim response body, which could echo the
@@ -250,9 +260,13 @@ lazily, so either works whether it runs before or after `import guideme`. Call `
 before the process exits, or the last batch never leaves. Install only the tracer provider
 and the log records go nowhere at no cost, which is why `events("both")` is the default.
 
-The logs API lives in `opentelemetry._logs` in OpenTelemetry 1.44.0. The underscore is the
-package's, not a private detail of this one: the module is the public logs API and has no
-alias without it.
+The logs API lives in `opentelemetry._logs` in OpenTelemetry 1.44.0, and that underscore is
+the whole reason the import is deferred and guarded. There is no public alias, so a release
+of `opentelemetry-api` inside the range guideme accepts may move it, rename what is in it, or
+change what `LogRecord` takes, with none of the notice a public name would come with. guideme
+therefore resolves everything it needs from that module once, inside one guard: if any of it
+is gone, the logs signal is absent, `import guideme` still works, traces are untouched, and
+`events("log")` and `events("both")` say so rather than emitting nothing.
 
 To see the same data on the console instead, swap the exporter for
 `opentelemetry.sdk.trace.export.ConsoleSpanExporter`. `examples/otlp` is a runnable version

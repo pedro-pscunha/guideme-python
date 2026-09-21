@@ -186,52 +186,11 @@ jobs:
       # every runtime dependency is pinned at a floor that is also its newest
       # release; the day one moves, this step says so in one line, and a reader six
       # months from now can tell the job did its job either way.
+      #
+      # It is a file under scripts/, not a heredoc, so ruff, pyright strict and
+      # pylint check it like everything else this repository runs.
       - name: What it resolved, against what the lock pins
-        run: |
-          uv run --no-sync python - <<'PY'
-          import importlib.metadata as metadata
-          import subprocess
-          import tomllib
-
-          RUNTIME = ("httpx", "pydantic", "opentelemetry-api")
-
-          committed = subprocess.run(
-              ["git", "show", "HEAD:uv.lock"], capture_output=True, text=True, check=True
-          ).stdout
-          pinned = {p["name"]: p["version"] for p in tomllib.loads(committed)["package"]}
-
-
-          def installed(name):
-              try:
-                  return metadata.version(name)
-              except metadata.PackageNotFoundError:
-                  return None
-
-
-          for name in RUNTIME:
-              got = installed(name) or "(not installed)"
-              was = pinned.get(name, "(not in the lock)")
-              note = "same as the lock" if got == was else f"NEWER than the lock's {was}"
-              print(f"{name:<20} resolved {got:<14} {note}")
-
-          moved = []
-          elsewhere = 0
-          for name, was in pinned.items():
-              if name == "guideme":
-                  continue
-              got = installed(name)
-              if got is None:
-                  elsewhere += 1
-              elif got != was:
-                  moved.append(name)
-
-          print()
-          if moved:
-              print(f"{len(moved)} resolved newer than the lock: {', '.join(sorted(moved))}")
-          else:
-              print("nothing in the lock has a newer release today; the range and the lock agree")
-          print(f"({elsewhere} locked for another platform, not installed here)")
-          PY
+        run: uv run --no-sync python scripts/resolved_vs_lock.py
 
       - name: Everything it resolved
         run: uv pip list

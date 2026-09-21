@@ -157,8 +157,10 @@ class ConfigError(GuidemeError):
     batch, unserialisable state or instructions, a duplicated rubric, a rubric
     outside 1..=255 choice options or 2..=10 score levels, `score_levels` handed
     a `str`, a non-positive timeout, negative retries or backoff, an `events(...)`
-    outside `"span"`, `"log"` and `"both"`, a `base_url` carrying credentials,
-    and anything else the package can refuse before it opens a socket.
+    outside `"span"`, `"log"` and `"both"`, `events("log")` or `events("both")`
+    where the installed `opentelemetry-api` provides no logs API, a `base_url`
+    carrying credentials, and anything else the package can refuse before it
+    opens a socket.
     """
 
     kind = "config"
