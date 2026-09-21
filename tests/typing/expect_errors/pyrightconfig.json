@@ -1,0 +1,15 @@
+{
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "include": ["."],
+  "reportMatchNotExhaustive": "error",
+  "reportImplicitOverride": "error",
+  "reportMissingSuperCall": "none",
+  "reportUnusedCallResult": "error",
+  "reportImportCycles": "error",
+  "reportPropertyTypeMismatch": "error",
+  "reportUninitializedInstanceVariable": "error",
+  "reportUnnecessaryComparison": "error",
+  "reportUnnecessaryTypeIgnoreComment": "error",
+  "enableReachabilityAnalysis": true
+}
