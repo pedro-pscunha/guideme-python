@@ -518,6 +518,11 @@ def _no_key_in_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     _ = Guide.from_env()
 
 
+def _no_key_in_the_environment_for_the_builder(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(KEY_VAR, raising=False)
+    _ = GuideBuilder().from_env()
+
+
 def _an_api_key_of_spaces(_monkeypatch: pytest.MonkeyPatch) -> None:
     _ = ApiKey("   ")
 
@@ -538,6 +543,7 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
         _a_credentialed_base_url,
         _an_empty_api_key,
         _no_key_in_the_environment,
+        _no_key_in_the_environment_for_the_builder,
         _an_api_key_of_spaces,
         _an_empty_model,
         _levels_given_as_one_string,
@@ -546,6 +552,7 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
         "credentialed_base_url",
         "empty_api_key",
         "key_not_in_the_environment",
+        "key_not_in_the_environment_for_the_builder",
         "api_key_of_spaces",
         "empty_model",
         "levels_given_as_one_string",

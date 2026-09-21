@@ -21,9 +21,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from guideme import (
-    ApiKey,
     Choice,
-    ConfigError,
     Guide,
     Levels,
     Policy,
@@ -74,16 +72,12 @@ def telemetry() -> tuple[TracerProvider, LoggerProvider]:
 def configured() -> Guide:
     """A guide from the environment that writes each event once, as a log record.
 
-    `Guide.from_env()` would cover the key on its own, but the signal is a builder
-    setting and both pipelines here point at the same collector, so `events("log")` is
-    what keeps an answer from being stored twice. It is this example's counterpart to the
-    Rust example's `filter_fn(|meta| meta.is_span())`.
+    Both pipelines here point at the same collector, so `events("log")` is what keeps an
+    answer from being stored twice: it is this example's counterpart to the Rust example's
+    `filter_fn(|meta| meta.is_span())`. The environment still supplies the key, and the
+    origin and model overrides keep working, because `from_env` is a builder step.
     """
-    key = os.environ.get("TYPESAFE_API_KEY")
-    if key is None:
-        detail = "TYPESAFE_API_KEY is not set"
-        raise ConfigError(detail)
-    return Guide.builder().api_key(ApiKey(key)).events("log").build()
+    return Guide.builder().from_env().events("log").build()
 
 
 def run(guide: Guide) -> None:

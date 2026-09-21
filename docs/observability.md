@@ -308,19 +308,17 @@ a different backend.
 ### What arrives
 
 Captured from `otel/opentelemetry-collector-contrib` with the debug exporter and the
-`collector.yaml` above, running a three-question batch under `events("log")`. A local
-stand-in answered the request rather than the live API, so the host, the port and the token
-counts are a laptop's; everything else is what guideme emits. Timestamps and `Flags` are
-trimmed.
+`collector.yaml` above, running `examples/otlp` under `events("log")` against the live API.
+Timestamps, `Flags` and the resource block are trimmed; nothing else is edited.
 
-One ask span, with the attempt that was throttled next to the one that succeeded:
+The three-question batch is one ask span with one attempt under it:
 
 ```
 InstrumentationScope guideme 0.1.0
-Span #0
-    Trace ID       : d550ca3cf34811bea8afafe163c3997f
+Span #1
+    Trace ID       : 164107043647c42bc827fff022ec4308
     Parent ID      :
-    ID             : 1efd39d3682a10f4
+    ID             : 53c4b9ada6417408
     Name           : guideme.ask
     Kind           : Client
     Status code    : Unset
@@ -328,77 +326,97 @@ Attributes:
      -> gen_ai.provider.name: Str(typesafe)
      -> gen_ai.operation.name: Str(ask)
      -> gen_ai.request.model: Str(jev-latest)
-     -> server.address: Str(127.0.0.1)
-     -> server.port: Int(51861)
+     -> server.address: Str(api.typesafe.ai)
+     -> server.port: Int(443)
      -> guideme.questions: Int(3)
-     -> guideme.state.bytes: Int(48)
+     -> guideme.state.bytes: Int(122)
      -> gen_ai.response.model: Str(jev-1.13.0)
      -> gen_ai.usage.input_tokens: Int(422)
      -> gen_ai.usage.output_tokens: Int(71)
 
 InstrumentationScope guideme.api 0.1.0
-Span #0
-    Parent ID      : 1efd39d3682a10f4
-    ID             : 9d530a6315cc40b4
-    Name           : POST /v1/systemone
-    Status code    : Error
-Attributes:
-     -> http.response.status_code: Int(429)
-     -> error.type: Str(429)
-
 Span #1
-    Parent ID      : 1efd39d3682a10f4
-    ID             : 62fb52a77072b13b
+    Trace ID       : 164107043647c42bc827fff022ec4308
+    Parent ID      : 53c4b9ada6417408
+    ID             : 87c527fab8d8efdd
     Name           : POST /v1/systemone
+    Kind           : Client
     Status code    : Unset
 Attributes:
-     -> http.request.resend_count: Int(1)
+     -> http.request.method: Str(POST)
+     -> server.address: Str(api.typesafe.ai)
+     -> server.port: Int(443)
+     -> url.full: Str(https://api.typesafe.ai/v1/systemone)
+     -> url.template: Str(/v1/systemone)
      -> http.response.status_code: Int(200)
 ```
 
-Its answers, on the logs pipeline, each pointing back at the ask span:
+Its three answers arrive on the logs pipeline, each carrying the ask span's ids:
 
 ```
 InstrumentationScope guideme 0.1.0
-LogRecord #0
+LogRecord #1
 SeverityText: INFO
 SeverityNumber: Info(9)
 EventName: guideme.answer
-Body: Str(q0 noul: yes)
+Body: Str(q0 choice: billing)
 Attributes:
      -> guideme.question: Str(q0)
-     -> guideme.kind: Str(noul)
-     -> guideme.outcome: Str(yes)
-     -> guideme.probability: Double(0.95)
+     -> guideme.kind: Str(choice)
+     -> guideme.outcome: Str(billing)
+     -> guideme.confidence: Double(0.99)
      -> guideme.unsure: Bool(false)
      -> guideme.yes_above: Double(0.5)
      -> guideme.no_below: Double(0.5)
-     -> guideme.min_confidence: Double(0)
-Trace ID: d550ca3cf34811bea8afafe163c3997f
-Span ID: 1efd39d3682a10f4
+     -> guideme.min_confidence: Double(0.6)
+Trace ID: 164107043647c42bc827fff022ec4308
+Span ID: 53c4b9ada6417408
 
 LogRecord #2
 SeverityText: INFO
 SeverityNumber: Info(9)
 EventName: guideme.answer
-Body: Str(q2 score: level 1)
+Body: Str(q1 score: level 1)
 Attributes:
-     -> guideme.question: Str(q2)
+     -> guideme.question: Str(q1)
      -> guideme.kind: Str(score)
      -> guideme.outcome: Int(1)
-     -> guideme.value: Double(0.95)
-     -> guideme.confidence: Double(0.92)
+     -> guideme.value: Double(1.46)
+     -> guideme.confidence: Double(0.31)
      -> guideme.unsure: Bool(false)
      -> guideme.yes_above: Double(0.5)
      -> guideme.no_below: Double(0.5)
      -> guideme.min_confidence: Double(0)
-Trace ID: d550ca3cf34811bea8afafe163c3997f
-Span ID: 1efd39d3682a10f4
+Trace ID: 164107043647c42bc827fff022ec4308
+Span ID: 53c4b9ada6417408
 ```
 
-`Span ID` is the ask span's `ID`, and all three records carry that same pair. The retry is
-the one record at `WARN`, from the other scope, and its `Span ID` is the throttled
-attempt's rather than the ask's:
+`Span ID` is the ask span's `ID`, and all three records carry that same pair, so a trace view
+and a log query land on the same ask. A failed ask arrives with the status set, the error
+typed, and its answer record still describing what the model said:
+
+```
+    Trace ID       : 9c1c4a27297bfb161cbdc81070956eb8
+    ID             : a5745aefe14b4424
+    Name           : guideme.ask
+    Status code    : Error
+    Status message : unsure answer for question q0: 0.35 against threshold 0.999
+     -> error.type: Str(unsure)
+
+LogRecord #0
+SeverityText: INFO
+EventName: guideme.answer
+Body: Str(q0 score: level 1)
+     -> guideme.confidence: Double(0.35)
+     -> guideme.unsure: Bool(true)
+     -> guideme.min_confidence: Double(0.999)
+Trace ID: 9c1c4a27297bfb161cbdc81070956eb8
+Span ID: a5745aefe14b4424
+```
+
+The retry record is the one at `WARN`, from the other scope, and its `Span ID` is the
+throttled attempt's rather than the ask's. The live API does not throttle on demand, so this
+block is from a local server that answers `429` once:
 
 ```
 InstrumentationScope guideme.api 0.1.0
@@ -415,8 +433,8 @@ Trace ID: d550ca3cf34811bea8afafe163c3997f
 Span ID: 9d530a6315cc40b4
 ```
 
-Under `events("span")` the same three answers arrive as events on the ask span and the
-logs pipeline receives nothing; under `events("both")`, as both.
+Under `events("span")` the same answers arrive as events on the ask span and the logs
+pipeline receives nothing; under `events("both")`, as both.
 
 ## Useful queries
 

@@ -22,6 +22,9 @@ First release, in progress. Nothing is on PyPI yet.
   or `events("log")` on the builder stores each one once where both pipelines run; `"both"` is
   the default and costs nothing without a logger provider. No record is ever emitted at
   `ERROR`: a failure is raised and marked on the span.
+- `GuideBuilder.from_env()` applies `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` and
+  `GUIDEME_MODEL` onto a builder, so a setting with no environment variable can be chained
+  after them; `Guide.from_env()` and `AsyncGuide.from_env()` are that step plus `build()`.
 - `spec/`: the JSON Schemas and the 42 golden policy vectors vendored from `guideme-rust`, run
   as the conformance suite, with a CI job that fails when this copy drifts from that
   repository's `main`.
