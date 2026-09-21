@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-First release, in progress. Nothing is on PyPI yet.
+Nothing yet.
+
+## 0.1.0 — 2026-09-21
+
+First release.
 
 - Questions as values: `noul`, `choose`, `score`, `choose_among`, `score_levels`, with
   `.yes_above`, `.no_below`, `.min_confidence`, `.criteria`, `.otherwise` and `.detail`.
@@ -21,7 +25,11 @@ First release, in progress. Nothing is on PyPI yet.
   and at `WARN`, carrying the trace and span ids of the span they came from. `events("span")`
   or `events("log")` on the builder stores each one once where both pipelines run; `"both"` is
   the default and costs nothing without a logger provider. No record is ever emitted at
-  `ERROR`: a failure is raised and marked on the span.
+  `ERROR`: a failure is raised and marked on the span. The logs API is private in
+  `opentelemetry-api`, so it is resolved defensively: a release without it costs the logs
+  signal and nothing else, and `events("log")` or `events("both")` is then a `ConfigError`
+  where the guide is configured rather than records that silently go nowhere. A sink that
+  raises is swallowed, so a logging failure never reaches the caller or the ask span.
 - `GuideBuilder.from_env()` applies `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` and
   `GUIDEME_MODEL` onto a builder, so a setting with no environment variable can be chained
   after them; `Guide.from_env()` and `AsyncGuide.from_env()` are that step plus `build()`.
