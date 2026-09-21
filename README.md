@@ -29,7 +29,7 @@ guide = Guide.from_env()
 if guide.ask(noul("Should this ticket be escalated?"), ticket):
     escalate()
 
-match guide.ask(choose(Department, "Which team should handle this?"), ticket):
+match guide.ask(choose(Department, "Which team should handle this?").min_confidence(0.6), ticket):
     case Department.billing:
         route_billing()
     case Department.technical:
@@ -47,7 +47,9 @@ The value of each member is the rubric the model reads. The member's name is the
 docstring on a member is documentation, not a rubric. pyright in strict mode enforces that
 every option is handled, so adding a department turns the `match` above into an error until
 you handle it. `from_env()` reads `TYPESAFE_API_KEY`, and `sales`, marked with `fallback(…)`,
-is also the answer when confidence is below the floor.
+is also the answer when confidence is below the floor. That floor is `min_confidence`, and it
+is `0.0` unless you set it, which is why the choice above asks for `0.6`: with the default a
+choice is never unsure and a `fallback(…)` member can never be reached.
 
 Two members may not share a rubric: Python would make the second an alias of the first, so a
 repeat is a `ConfigError` on the class statement rather than a rubric quietly one option
@@ -73,17 +75,28 @@ pip install guideme
 Python 3.12 or newer. The package ships `py.typed`, so your checker sees every annotation.
 
 Set `TYPESAFE_API_KEY` in the environment, or pass a key to
-`Guide.builder().api_key(ApiKey("…"))`.
+`Guide.builder().api_key(ApiKey("…")).build()`. Keys come from the TypeSafe console, on its
+[keys page](https://console.typesafe.ai/keys).
 
-## The three questions
+guideme is not the official TypeSafe SDK. That one is
+[`typesafe-sdk`](https://docs.typesafe.ai/sdk/python), which mirrors the API: you send
+questions and read answers. guideme adds the layer above it, turning an answer into control
+flow — your own enums as the option set, thresholds and an unsure ladder as policy, one span
+per request — and talks to the API itself rather than wrapping that package.
+
+## Three kinds of question, five constructors
 
 | Constructor | Sends | Plain output | `.detail()` output |
 |---|---|---|---|
 | `noul("…")` | a yes/no question | `bool` | `Verdict` with the label and the probability |
-| `choose(C, "…")` where `C` is a `Choice` | a choice over `C`'s members | `C` | `Ranked[C]` with confidence and the full distribution |
-| `score(L, "…")` where `L` is a `Levels` | a score over `L`'s levels, low to high | `L`, the most probable level | `Scored[L]` with the expected `value`, the level, confidence and distribution |
-| `choose_among("…", options)` | a choice over runtime `{key: rubric}` pairs | `Key` | `Ranked[Key]` |
-| `score_levels("…", levels)` | a score over runtime level descriptions | `Rank` | `Scored[Rank]` |
+| `choose(C, "…")` where `C` is a `Choice` | a choice over `C`'s 1 to 255 members | `C` | `Ranked[C]` with confidence and `probabilities`, the whole distribution |
+| `score(L, "…")` where `L` is a `Levels` | a score over `L`'s 2 to 10 levels, low to high | `L`, the most probable level | `Scored[L]` with the expected `value`, the level, confidence and `distribution` |
+| `choose_among("…", options)` | a choice over 1 to 255 runtime `{key: rubric}` pairs | `Key` | `Ranked[Key]` |
+| `score_levels("…", levels)` | a score over 2 to 10 runtime level descriptions | `Rank` | `Scored[Rank]` |
+
+Those size limits are the API's, and guideme checks them where you write the rubric: a `Choice`
+or `Levels` class outside the range is a `ConfigError` on the class statement, and a runtime
+rubric is one on the constructor call.
 
 A noul can carry `.criteria("what yes means", "what no means")`. Instructions accept a string
 or any JSON-shaped value, so a question can reference structured data by field name the way
@@ -130,7 +143,12 @@ match reading.verdict:
         other()
     case "unsure":
         review(reading.p)
+
+picked = strict.ask(choose(Department, "Which team?").detail(), ticket)
 ```
+
+`strict` shares the connection pool and inherits `CAUTIOUS`, with `min_confidence` patched over
+it, so the choice above is unsure below `0.8` while the noul still reads against `0.7 / 0.3`.
 
 ## Several judgments, one request
 
@@ -177,6 +195,10 @@ The synchronous version is the same three lines with `Guide` and without the `aw
 `Guide.builder()` and `AsyncGuide.builder()` return the same `GuideBuilder`; `.build()` gives
 the synchronous guide and `.build_async()` the asynchronous one.
 
+Both guides also answer `models()`, which returns a `tuple[ModelInfo, ...]`: the models the
+account may use, each with its `name`, `description` and `release_date`. It is one call to
+`GET /v1/models` and gets no ask span of its own.
+
 ## Observability
 
 guideme emits OpenTelemetry spans, span events and OTLP log records through
@@ -207,13 +229,14 @@ appears anywhere.
 Every answer and every retry is also an OTLP log record, at `INFO` and at `WARN`, carrying the
 trace id and the span id of the span it came from, so a logs backend links one straight back to
 the decision it explains. Install a `LoggerProvider` too and they arrive; install neither and
-they cost nothing. `events("span")` or `events("log")` on the builder picks one signal when you
-export both and would rather store each event once.
+they cost nothing. `events(...)` on the builder picks which signal carries an event when you
+export both; **Choosing a signal** in the observability document has the table and the default.
 
 Because the shapes are standard, any OTLP backend reads them as is.
-[`docs/observability.md`](docs/observability.md) has the field tables and the environment
-variables that point the exporter anywhere. [`examples/otlp`](examples/otlp) runs all of it
-against the live API with a collector that prints what arrives.
+[`docs/observability.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/observability.md)
+has the field tables and the environment variables that point the exporter anywhere.
+[`examples/otlp`](https://github.com/pedro-pscunha/guideme-python/tree/main/examples/otlp) runs
+all of it against the live API with a collector that prints what arrives.
 
 ## Errors
 
@@ -230,15 +253,23 @@ and the value of `error.type` on the failed span.
 | `UnexpectedStatusError` | `unexpected_status` | anything the contract does not define |
 | `ProtocolError` | `protocol` | the response violates the contract: undecodable body, wrong answer kind, option or level not in the rubric, probability outside 0..1 |
 | `UnsureError` | `unsure` | the policy said unsure and nothing caught it |
-| `ConfigError` | `config` | bad thresholds, missing key, empty batch, unserialisable state, empty or duplicate rubric |
+| `ConfigError` | `config` | raised where the mistake is written: bad thresholds, missing key, empty batch, unserialisable state, a duplicate rubric, a rubric outside 1..255 options or 2..10 levels, a bad `events(...)`, a non-positive timeout, negative retries or backoff, a `base_url` carrying credentials, and so on |
 
 Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and honour
 `retry-after`.
 
 ## Lower layers
 
-- `guideme.api` is the exact wire mirror of `POST /v1/systemone` and `GET /v1/models`, plus
-  `Client` and `AsyncClient` for callers who want to build requests themselves.
+Everything above is re-exported from the `guideme` package, and `guideme.__all__` is that list.
+The two modules below are a second supported tier: you import them by their own path, they are
+not re-exported at the top level, and they are under the same rule as the first tier — nothing
+in them is removed or renamed without a major version and a `CHANGELOG.md` entry. Anything else
+in the package is private, whatever its name looks like.
+
+- `guideme.api` is the exact wire mirror of `POST /v1/systemone` and `GET /v1/models`.
+  `guideme.api.client` holds `Client` and `AsyncClient` for callers who want to build requests
+  themselves. They live one level down rather than on `guideme.api` because re-exporting them
+  would make `api` and `api.client` import each other, and the gate fails an import cycle.
 - The scalars are validated once and never re-checked: `Probability` and `Confidence` hold the
   unit-interval numbers on `Verdict`, `Ranked` and `Scored`, `Key` and `Rank` are what a runtime
   rubric answers with, `Model` names the model to ask, and `ApiKey` carries the key without ever
@@ -247,8 +278,10 @@ Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and 
 - `guideme.policy.resolve(answer, thresholds)` is the pure decision function. `spec/` holds
   its JSON Schemas and 42 golden vectors, vendored from
   [guideme-rust](https://github.com/pedro-pscunha/guideme-rust), which publishes the contract.
-  [`docs/contract.md`](docs/contract.md) says what every guideme SDK must satisfy and
-  [`docs/design.md`](docs/design.md) records the design and its sharp edges.
+  [`docs/contract.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/contract.md)
+  says what every guideme SDK must satisfy and
+  [`docs/design.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/design.md)
+  records the design and its sharp edges.
 
 ## Other SDKs
 
@@ -289,7 +322,9 @@ mise run hooks    # point core.hooksPath at the tracked hooks in .githooks
 ```
 
 The hooks are tracked, not generated: `mise run hooks` sets this repository's `core.hooksPath`
-to `.githooks` and verifies it took effect. [`AGENTS.md`](AGENTS.md) says what each stage runs.
+to `.githooks` and verifies it took effect.
+[`AGENTS.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/AGENTS.md) says what
+each stage runs.
 
 Library code is held to a strict checker set: `pyright` in strict mode, `ruff` with every rule
 selected, and `pylint` with every check enabled. Tests are few and high-grade: property tests
@@ -303,8 +338,11 @@ Two opt-in tests hit the real API and are deselected by default:
 TYPESAFE_API_KEY=… uv run --locked pytest -m live
 ```
 
-Contributor rules live in [`AGENTS.md`](AGENTS.md). Report a vulnerability privately, as
-[`SECURITY.md`](SECURITY.md) describes, never in a public issue.
+Contributor rules live in
+[`AGENTS.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/AGENTS.md). Report a
+vulnerability privately, as
+[`SECURITY.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/SECURITY.md)
+describes, never in a public issue.
 
 ## License
 

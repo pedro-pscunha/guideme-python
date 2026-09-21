@@ -13,7 +13,7 @@ from guideme.errors import (
     UnexpectedStatusError,
     UnsureError,
 )
-from guideme.guide import AsyncGuide, Guide, GuideBuilder
+from guideme.guide import AsyncGuide, Guide, GuideBuilder, ModelInfo
 from guideme.policy import Policy, Thresholds, Verdict
 from guideme.question import (
     Ranked,
@@ -40,6 +40,7 @@ __all__ = [
     "Key",
     "Levels",
     "Model",
+    "ModelInfo",
     "OverloadedError",
     "Policy",
     "Probability",

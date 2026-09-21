@@ -2,16 +2,20 @@
 
 This is the code the README shows, with an `assert_type` after every `ask`. It is never
 executed; `pyright` checks it as part of the gate, so the documented example cannot drift
-from what the package actually infers. Lane C's README is written from this file.
+from what the package actually infers.
 """
 
 from typing import assert_type
 
 from guideme import (
+    ApiKey,
     AsyncGuide,
     Choice,
     Guide,
     Levels,
+    Policy,
+    Probability,
+    Ranked,
     Scored,
     Verdict,
     choose,
@@ -54,6 +58,21 @@ def prioritise() -> None:
     """Stand-in for the caller's own work."""
 
 
+def billing() -> None:
+    """Stand-in for the caller's own work."""
+
+
+def other() -> None:
+    """Stand-in for the caller's own work."""
+
+
+def review(p: Probability) -> None:
+    """Stand-in for the caller's own work."""
+
+
+CAUTIOUS = Policy(yes_above=0.7, no_below=0.3)
+
+
 def triage(ticket: Json) -> None:
     """A yes/no is an `if`, a choice is an exhaustive `match`, a score is a comparison."""
     guide = Guide.from_env()
@@ -61,7 +80,9 @@ def triage(ticket: Json) -> None:
     if guide.ask(noul("Should this ticket be escalated?"), ticket):
         escalate()
 
-    match guide.ask(choose(Department, "Which team should handle this?"), ticket):
+    match guide.ask(
+        choose(Department, "Which team should handle this?").min_confidence(0.6), ticket
+    ):
         case Department.billing:
             route_billing()
         case Department.technical:
@@ -91,6 +112,27 @@ def triage(ticket: Json) -> None:
 
     if urgent or mood.value > 1.5 or flags["vip"]:
         prioritise()
+
+    guide.close()
+
+
+def house_policy(key: ApiKey, ticket: Json) -> None:
+    """A house policy is a module constant; a scoped copy patches over it."""
+    guide = Guide.builder().api_key(key).policy(CAUTIOUS).build()
+    strict = guide.with_policy(Policy(min_confidence=0.8))
+
+    reading = guide.ask(noul("Is this about billing?").detail(), ticket)
+    _ = assert_type(reading, Verdict)
+    match reading.verdict:
+        case "yes":
+            billing()
+        case "no":
+            other()
+        case "unsure":
+            review(reading.p)
+
+    picked = strict.ask(choose(Department, "Which team?").detail(), ticket)
+    _ = assert_type(picked, Ranked[Department])
 
     guide.close()
 

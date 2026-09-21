@@ -152,8 +152,13 @@ class UnsureError(GuidemeError):
 class ConfigError(GuidemeError):
     """Bad configuration.
 
-    Thresholds outside `0..=1`, `no_below > yes_above`, a missing or empty key,
-    an empty batch, unserialisable state, or an empty or duplicated rubric.
+    Raised where the mistake is written, never carried to the wire. Thresholds
+    outside `0..=1` or `no_below > yes_above`, a missing or empty key, an empty
+    batch, unserialisable state or instructions, a duplicated rubric, a rubric
+    outside 1..=255 choice options or 2..=10 score levels, `score_levels` handed
+    a `str`, a non-positive timeout, negative retries or backoff, an `events(...)`
+    outside `"span"`, `"log"` and `"both"`, a `base_url` carrying credentials,
+    and anything else the package can refuse before it opens a socket.
     """
 
     kind = "config"

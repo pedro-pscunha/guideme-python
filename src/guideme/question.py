@@ -30,7 +30,10 @@ from guideme.scalars import Confidence, Key, Probability, Rank
 @final
 @dataclass(frozen=True, slots=True)
 class Ranked[C]:
-    """A choice answer in full: the pick, its confidence, and the whole distribution."""
+    """A choice answer in full: the pick, its confidence, and `probabilities`.
+
+    `probabilities` is the whole distribution, one entry per option in rubric order.
+    """
 
     choice: C
     confidence: Confidence
@@ -41,7 +44,10 @@ class Ranked[C]:
 @final
 @dataclass(frozen=True, slots=True)
 class Scored[L]:
-    """A score answer in full: expected value, argmax level, confidence, distribution."""
+    """A score answer in full: expected `value`, argmax `level`, confidence, `distribution`.
+
+    `distribution` is the whole distribution, one entry per level in rubric order.
+    """
 
     value: float
     level: L
@@ -420,7 +426,11 @@ def choose[C: Choice](options: type[C], instructions: Json) -> ChoiceQuestion[C]
 
 
 def choose_among(instructions: Json, options: Mapping[str, str | None]) -> ChoiceQuestion[Key]:
-    """Pick one of the runtime options `(key, rubric)`. Plain output: `Key`."""
+    """Pick one of the runtime options `(key, rubric)`. Plain output: `Key`.
+
+    Takes 1 to 255 options, the same range a `Choice` enum takes. A rubric
+    outside it, or one with a duplicate key, is a `ConfigError`.
+    """
     return _choice(
         instructions,
         tuple(options.items()),
@@ -452,6 +462,9 @@ def score[L: Levels](levels: type[L], instructions: Json) -> ScoreQuestion[L]:
 
 def score_levels(instructions: Json, levels: Sequence[str]) -> ScoreQuestion[Rank]:
     """Rate on runtime levels, low to high. Plain output: `Rank`.
+
+    Takes 2 to 10 levels, the same range a `Levels` enum takes; outside it is a
+    `ConfigError`.
 
     A `str` is a `Sequence[str]` of its own characters, so `score_levels("…", "abc")`
     would quietly ask about a three-letter scale. It is a `ConfigError` instead.

@@ -314,7 +314,10 @@ a different backend.
 
 Captured from `otel/opentelemetry-collector-contrib` with the debug exporter and the
 `collector.yaml` above, running `examples/otlp` under `events("log")` against the live API.
-Timestamps, `Flags` and the resource block are trimmed; nothing else is edited.
+Timestamps, `Flags` and the resource block are trimmed throughout. The first two blocks are
+otherwise complete; the later ones are excerpts, cut to the lines each is making a point about,
+so a missing `Parent ID`, `Kind`, scope line or attribute there means it was cut, not that it
+was absent. Nothing is reworded, and no value is invented.
 
 The three-question batch is one ask span with one attempt under it:
 

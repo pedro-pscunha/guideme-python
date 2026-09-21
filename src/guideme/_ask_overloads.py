@@ -323,7 +323,36 @@ class SyncAskOverloads(ABC):
     ) -> tuple[T0, T1, T2, T3, T4, T5, T6, list[T]]: ...
 
     def ask(self, shape: object, state: Json) -> object:
-        """Answer `shape` about `state` in one request and one `guideme.ask` span."""
+        """Answer `shape` about `state` in one request and one `guideme.ask` span.
+
+        A batch is atomic: one answer the policy cannot resolve fails the whole call, so
+        put `.otherwise(...)` or `.detail()` on the questions that may come back unsure.
+
+        Args:
+            shape: A question, or a tuple, list or dict of questions, nested freely.
+                Ids are `q0..qN` in encounter order, and the answer has the shape of
+                the request.
+            state: What to judge, as anything JSON-shaped.
+
+        Returns:
+            The answers, in the shape of `shape`.
+
+        Raises:
+            ConfigError: `shape` holds something that is not a question, the batch is
+                empty, two runtime keys collide, or `state` or the instructions cannot
+                be serialised to JSON.
+            UnsureError: the policy read an answer as unsure and neither
+                `.otherwise(...)` nor a `fallback(...)` member caught it.
+            ProtocolError: the response breaks the contract: an undecodable body, the
+                wrong answer kind, an option or level outside the rubric, or a
+                probability outside `0..=1`.
+            AuthError: the key was refused (`401`).
+            InvalidError: the API rejected the request (`422`).
+            RateLimitedError: still throttled after the retries (`429`).
+            OverloadedError: still overloaded after the retries (`529`).
+            TransportError: the request never completed: connection, TLS or timeout.
+            UnexpectedStatusError: a status the contract does not define.
+        """
         return self._ask(shape, state)
 
 
@@ -635,5 +664,34 @@ class AsyncAskOverloads(ABC):
     ) -> Awaitable[tuple[T0, T1, T2, T3, T4, T5, T6, list[T]]]: ...
 
     def ask(self, shape: object, state: Json) -> Awaitable[object]:
-        """Answer `shape` about `state` in one request and one `guideme.ask` span."""
+        """Answer `shape` about `state` in one request and one `guideme.ask` span.
+
+        A batch is atomic: one answer the policy cannot resolve fails the whole call, so
+        put `.otherwise(...)` or `.detail()` on the questions that may come back unsure.
+
+        Args:
+            shape: A question, or a tuple, list or dict of questions, nested freely.
+                Ids are `q0..qN` in encounter order, and the answer has the shape of
+                the request.
+            state: What to judge, as anything JSON-shaped.
+
+        Returns:
+            The answers, in the shape of `shape`.
+
+        Raises:
+            ConfigError: `shape` holds something that is not a question, the batch is
+                empty, two runtime keys collide, or `state` or the instructions cannot
+                be serialised to JSON.
+            UnsureError: the policy read an answer as unsure and neither
+                `.otherwise(...)` nor a `fallback(...)` member caught it.
+            ProtocolError: the response breaks the contract: an undecodable body, the
+                wrong answer kind, an option or level outside the rubric, or a
+                probability outside `0..=1`.
+            AuthError: the key was refused (`401`).
+            InvalidError: the API rejected the request (`422`).
+            RateLimitedError: still throttled after the retries (`429`).
+            OverloadedError: still overloaded after the retries (`529`).
+            TransportError: the request never completed: connection, TLS or timeout.
+            UnexpectedStatusError: a status the contract does not define.
+        """
         return self._ask(shape, state)
