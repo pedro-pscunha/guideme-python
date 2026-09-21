@@ -54,7 +54,22 @@ dev = [
 packages = ["src/guideme"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/guideme", "spec", "README.md", "CHANGELOG.md", "LICENSE-*", "pyproject.toml"]
+# The sdist is the complete source: a downstream packager can read the docs the
+# README links to, run the suite, and build the example. Anything short of that is
+# a half-archive -- hatchling matches README.md and pyproject.toml at every depth,
+# so an example's own copies of those two arrive whether the example ships or not.
+# `mise run build` asserts that three of these paths are in the archive.
+include = [
+  "src/guideme",
+  "spec",
+  "docs",
+  "examples",
+  "tests",
+  "README.md",
+  "CHANGELOG.md",
+  "LICENSE-*",
+  "pyproject.toml",
+]
 
 [tool.uv]
 required-version = ">=0.12"

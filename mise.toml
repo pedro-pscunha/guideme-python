@@ -39,8 +39,29 @@ description = "pytest (live tests deselected)"
 run = "uv run --locked pytest"
 
 [tasks.build]
-description = "sdist + wheel, then twine check"
-run = ["rm -rf dist", "uv build", "uv run --locked twine check dist/*"]
+description = "sdist + wheel, twine check, and the sdist carries what it claims"
+shell = "bash -c"
+# `twine check` reads the metadata, not the contents. The sdist's include list is a
+# decision -- everything needed to read the docs, run the suite and build the
+# example -- and a decision that is only ever inspected by hand drifts. These three
+# paths stand for the three directories the list adds beyond the package itself.
+run = '''
+set -euo pipefail
+rm -rf dist
+uv build
+uv run --locked twine check dist/*
+sdist="$(echo dist/*.tar.gz)"
+prefix="$(basename "$sdist" .tar.gz)"
+listing="$(tar tzf "$sdist")"
+for path in examples/otlp/main.py docs/observability.md tests/test_policy_vectors.py; do
+  if grep -Fqx "$prefix/$path" <<<"$listing"; then
+    echo "sdist carries $path"
+  else
+    echo "$sdist does not carry $path -- the include list and the docs disagree" >&2
+    exit 1
+  fi
+done
+'''
 
 [tasks.audit]
 description = "pip-audit over the locked dependency set"
