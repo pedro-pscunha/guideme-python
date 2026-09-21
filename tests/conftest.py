@@ -1,21 +1,22 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
 from hypothesis import HealthCheck, settings
+from jsonschema import Draft202012Validator
+from pydantic import TypeAdapter
 
 from guideme._json import Json
+from guideme.api import Answer as WireAnswer
+from guideme.api import answer_from_wire
 from guideme.policy import (
     Answer,
-    ChoiceAnswer,
     ChoiceOutcome,
-    NoulAnswer,
     NoulOutcome,
     Outcome,
-    ScoreAnswer,
     ScoreOutcome,
 )
-from guideme.scalars import confidence, probability
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -69,30 +70,29 @@ def as_float(value: Json) -> float:
     return float(value)
 
 
-# Lane B replaces this with guideme.api.answer_from_wire.
+WIRE_ANSWER: TypeAdapter[WireAnswer] = TypeAdapter(WireAnswer)
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+SCHEMAS = REPO_ROOT / "spec" / "schema"
+
+
 def answer_from_json(raw: Json) -> Answer:
-    entry = as_object(raw)
-    match as_str(entry["type"]):
-        case "noul":
-            return NoulAnswer(probability(as_float(entry["noul"])))
-        case "choice":
-            probabilities = as_object(entry["probabilities"])
-            return ChoiceAnswer(
-                choice=as_str(entry["choice"]),
-                probabilities={k: probability(as_float(v)) for k, v in probabilities.items()},
-                confidence=confidence(as_float(entry["confidence"])),
-            )
-        case "score":
-            legend = as_object(entry["legend"])
-            probabilities = as_object(entry["probabilities"])
-            return ScoreAnswer(
-                score=as_float(entry["score"]),
-                legend={int(k): as_str(v) for k, v in legend.items()},
-                probabilities={int(k): probability(as_float(v)) for k, v in probabilities.items()},
-                confidence=confidence(as_float(entry["confidence"])),
-            )
-        case other:
-            raise AssertionError(other)
+    """A golden vector's answer through the real wire layer, exactly as an ask does it."""
+    return answer_from_wire(WIRE_ANSWER.validate_python(raw))
+
+
+def validator(name: str) -> Callable[[object], None]:
+    """A checker against one vendored schema.
+
+    `jsonschema` ships no `py.typed`, so its surface is pulled in here once, behind a
+    declared signature, instead of spreading inferred types through the tests.
+    """
+    checker = Draft202012Validator(as_object(load_json(SCHEMAS / f"{name}.json")))
+
+    def check(instance: object) -> None:
+        checker.validate(instance)  # pyright: ignore[reportUnknownMemberType] -- no py.typed
+
+    return check
 
 
 def outcome_json(outcome: Outcome) -> Json:
