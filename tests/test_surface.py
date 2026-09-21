@@ -1,8 +1,6 @@
 import ast
 from pathlib import Path
 
-import pytest
-
 import guideme
 
 from .conftest import REPO_ROOT
@@ -44,8 +42,6 @@ DOCUMENTED = frozenset(
     }
 )
 
-EXECUTORS = frozenset({"Guide", "AsyncGuide", "GuideBuilder"})
-
 PACKAGE = REPO_ROOT / "src" / "guideme"
 WIRE_ONLY = frozenset({"httpx", "pydantic"})
 
@@ -66,14 +62,9 @@ def _imports(path: Path) -> set[str]:
 
 
 def test_public_surface_is_exactly_the_documented_list() -> None:
-    assert set(guideme.__all__) == DOCUMENTED - EXECUTORS
+    assert set(guideme.__all__) == DOCUMENTED
     assert list(guideme.__all__) == sorted(guideme.__all__)
     assert all(hasattr(guideme, name) for name in guideme.__all__)
-
-
-@pytest.mark.xfail(strict=True, reason="Guide, AsyncGuide and GuideBuilder land with the runtime")
-def test_the_executors_are_exported() -> None:
-    assert set(guideme.__all__) >= EXECUTORS
 
 
 def test_httpx_and_pydantic_stay_behind_the_api_package() -> None:

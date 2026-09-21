@@ -33,6 +33,7 @@ and `spec/` pins it. The live TypeSafe docs are the source of truth for the wire
 | `src/guideme/telemetry.py` | every span, event and attribute | the names are the contract, documented in `docs/observability.md`; installs no provider |
 | `src/guideme/api/__init__.py` | the wire mirror and the adapters to the core | mirrors `spec/schema/*.json` field for field; no policy here |
 | `src/guideme/api/client.py` | HTTP, retries, statuses to errors, one span per attempt | the only importer of `httpx`; every decision it makes is made by the pure `step` |
+| `src/guideme/guide.py` | `Guide`, `AsyncGuide`, `GuideBuilder`, `ModelInfo` | the two executors share `_prepare` and `_finish`; what is written twice is the two `await`s |
 | `spec/` | the vendored schemas and golden vectors | read-only here; it is `guideme-rust`'s output, and `mise run spec-check` proves this copy matches |
 
 Modules keep a one-way import graph, which `pyright`'s `reportImportCycles` enforces:

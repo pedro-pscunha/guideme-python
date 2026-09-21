@@ -13,6 +13,7 @@ from guideme.errors import (
     UnexpectedStatusError,
     UnsureError,
 )
+from guideme.guide import AsyncGuide, Guide, GuideBuilder
 from guideme.policy import Policy, Thresholds, Verdict
 from guideme.question import (
     Ranked,
@@ -27,10 +28,13 @@ from guideme.scalars import ApiKey, Confidence, Key, Model, Probability, Rank
 
 __all__ = [
     "ApiKey",
+    "AsyncGuide",
     "AuthError",
     "Choice",
     "Confidence",
     "ConfigError",
+    "Guide",
+    "GuideBuilder",
     "GuidemeError",
     "InvalidError",
     "Key",
