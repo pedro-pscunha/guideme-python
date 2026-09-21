@@ -6,7 +6,7 @@ so a house question can be a module constant.
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Self, final
 
 from guideme._json import Json
@@ -256,7 +256,12 @@ class Question[T]:
     instructions: Json
     spec: Spec
     policy: Policy
-    _read: Reader[T]
+    # How to read the outcome is decided by the constructor, and for a choice or a score
+    # it is a fresh closure over the rubric, so two questions written the same way hold
+    # two different functions. Out of `__eq__` and out of `repr`: what makes a question
+    # the question it is is its instructions, its spec and its policy, and a function's
+    # address in a `repr` is noise.
+    _read: Reader[T] = field(compare=False, repr=False)
     _chosen: T | None
 
     def with_policy(self, policy: Policy) -> Self:
@@ -339,7 +344,7 @@ class DetailedChoice[C](_Confident[Ranked[C]]):
 class ChoiceQuestion[C](_Confident[C], _Fallible[C]):
     """A choice read as one of the caller's options."""
 
-    _detail: Reader[Ranked[C]]
+    _detail: Reader[Ranked[C]] = field(compare=False, repr=False)
 
     def detail(self) -> DetailedChoice[C]:
         """Read the full `Ranked` instead. Any `.otherwise(...)` is dropped."""
@@ -363,7 +368,7 @@ class DetailedScore[L](_Confident[Scored[L]]):
 class ScoreQuestion[L](_Confident[L], _Fallible[L]):
     """A score read as one of the caller's levels."""
 
-    _detail: Reader[Scored[L]]
+    _detail: Reader[Scored[L]] = field(compare=False, repr=False)
 
     def detail(self) -> DetailedScore[L]:
         """Read the full `Scored` instead. Any `.otherwise(...)` is dropped."""

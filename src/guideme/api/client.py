@@ -269,11 +269,16 @@ class Client:
         timeout: timedelta,
         events: Events,
     ) -> None:
-        """Open the connection pool. The key is held as an `ApiKey`, never as a header."""
+        """Open the connection pool. The key is held as an `ApiKey`, never as a header.
+
+        `events` is read back by the guide that owns this client, so the routing knob has
+        one home: this client emits the retries under it, the guide emits the answers.
+        """
         self.endpoint = endpoint
+        # Declared, because pyright widens a `Literal` inferred from an assignment.
+        self.events: Events = events
         self._retry = retry
         self._api_key = api_key
-        self._events: Events = events
         self._http = httpx.Client(timeout=timeout.total_seconds(), follow_redirects=True)
 
     def evaluate(self, request: Request) -> Response:
@@ -301,7 +306,7 @@ class Client:
                         return outcome
                     case Retry(delay=delay):
                         fail_attempt(span, str(response.status_code))
-                        retry_event(span, response.status_code, attempt + 1, delay, self._events)
+                        retry_event(span, response.status_code, attempt + 1, delay, self.events)
                         time.sleep(delay.total_seconds())
                     case GuidemeError():
                         fail_attempt(span, _attempt_error(response.status_code, outcome))
@@ -339,11 +344,16 @@ class AsyncClient:
         timeout: timedelta,
         events: Events,
     ) -> None:
-        """Open the connection pool. The key is held as an `ApiKey`, never as a header."""
+        """Open the connection pool. The key is held as an `ApiKey`, never as a header.
+
+        `events` is read back by the guide that owns this client, so the routing knob has
+        one home: this client emits the retries under it, the guide emits the answers.
+        """
         self.endpoint = endpoint
+        # Declared, because pyright widens a `Literal` inferred from an assignment.
+        self.events: Events = events
         self._retry = retry
         self._api_key = api_key
-        self._events: Events = events
         self._http = httpx.AsyncClient(timeout=timeout.total_seconds(), follow_redirects=True)
 
     async def evaluate(self, request: Request) -> Response:
@@ -373,7 +383,7 @@ class AsyncClient:
                         return outcome
                     case Retry(delay=delay):
                         fail_attempt(span, str(response.status_code))
-                        retry_event(span, response.status_code, attempt + 1, delay, self._events)
+                        retry_event(span, response.status_code, attempt + 1, delay, self.events)
                         await asyncio.sleep(delay.total_seconds())
                     case GuidemeError():
                         fail_attempt(span, _attempt_error(response.status_code, outcome))

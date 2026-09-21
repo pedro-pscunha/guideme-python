@@ -37,6 +37,8 @@ from guideme.telemetry import (
     answer_event,
     ask_span,
     fail_ask,
+    logs_available,
+    logs_missing,
     record_response,
 )
 
@@ -77,12 +79,16 @@ class ModelInfo:
 @final
 @dataclass(frozen=True, slots=True)
 class _Config:
-    """What a guide carries besides its client."""
+    """What a guide carries besides its client.
+
+    Not where the answers and retries go: that is one setting used on both sides of the
+    seam, so the client owns it and the guide reads `client.events` back, the same way it
+    reads `client.endpoint`.
+    """
 
     model: Model
     policy: Policy
     record_state: bool
-    events: Events
 
 
 @final
@@ -226,7 +232,7 @@ class Guide(SyncAskOverloads):
         with _open(prepared, self._config, self._client.endpoint) as span:
             try:
                 response = self._client.evaluate(prepared.request)
-                decoded = _finish(span, prepared, response, self._config.events)
+                decoded = _finish(span, prepared, response, self._client.events)
             except GuidemeError as error:
                 fail_ask(span, error)
                 raise
@@ -281,7 +287,7 @@ class AsyncGuide(AsyncAskOverloads):
         with _open(prepared, self._config, self._client.endpoint) as span:
             try:
                 response = await self._client.evaluate(prepared.request)
-                decoded = _finish(span, prepared, response, self._config.events)
+                decoded = _finish(span, prepared, response, self._client.events)
             except GuidemeError as error:
                 fail_ask(span, error)
                 raise
@@ -318,6 +324,12 @@ class GuideBuilder:
         `Guide.from_env()` is this followed by `build()`. Reach for the builder form when a
         setting has no environment variable, as `Guide.builder().from_env().events("log")`
         does: the environment still supplies the key and the origin.
+
+        This is an ordinary setter, so the last write wins and the order of the chain is
+        what decides. `.api_key(k).from_env()` replaces `k` with the environment's key;
+        `.from_env().base_url(x)` keeps `x`. A variable that is not set writes nothing, so
+        `.base_url(x).from_env()` keeps `x` when `TYPESAFE_BASE_URL` is absent and replaces
+        it when it is present.
 
         Raises:
             ConfigError: `TYPESAFE_API_KEY` is not set.
@@ -381,10 +393,21 @@ class GuideBuilder:
         logger provider installed the record goes to OpenTelemetry's no-op logger. An
         application exporting traces and logs to the same backend sets `"span"` or
         `"log"` so each event is stored once.
+
+        `"span"` needs nothing but the traces API. `"log"` and `"both"` need the logs
+        API, which `opentelemetry-api` keeps private, so asking for either where the
+        installed release has none is refused here rather than silently dropping every
+        record.
+
+        Raises:
+            ConfigError: `where` is not one of the three modes, or it asks for log
+                records and this `opentelemetry-api` provides no logs API.
         """
         if where not in EVENT_MODES:
             detail = f"events {where!r} is not one of {', '.join(sorted(EVENT_MODES))}"
             raise ConfigError(detail)
+        if where != "span" and not logs_available():
+            raise ConfigError(logs_missing(where))
         self._events = where
         return self
 
@@ -396,12 +419,12 @@ class GuideBuilder:
     def build(self) -> Guide:
         """Build a synchronous guide, validating the policy and the origin now."""
         key, endpoint, config = self._settle()
-        return Guide(Client(key, endpoint, self._retry, self._timeout, config.events), config)
+        return Guide(Client(key, endpoint, self._retry, self._timeout, self._events), config)
 
     def build_async(self) -> AsyncGuide:
         """Build an asyncio guide, validating the policy and the origin now."""
         key, endpoint, config = self._settle()
-        client = AsyncClient(key, endpoint, self._retry, self._timeout, config.events)
+        client = AsyncClient(key, endpoint, self._retry, self._timeout, self._events)
         return AsyncGuide(client, config)
 
     def _settle(self) -> tuple[ApiKey, Endpoint, _Config]:
@@ -413,10 +436,5 @@ class GuideBuilder:
         return (
             self._api_key,
             Endpoint.parse(self._base_url),
-            _Config(
-                model=self._model,
-                policy=self._policy,
-                record_state=self._record_state,
-                events=self._events,
-            ),
+            _Config(model=self._model, policy=self._policy, record_state=self._record_state),
         )

@@ -68,6 +68,7 @@ from .conftest import (
     noul_reply,
     reply,
     validator,
+    without_the_logs_api,
 )
 
 check_request = validator("request")
@@ -300,10 +301,30 @@ def test_two_async_asks_wait_out_their_retries_at_the_same_time(httpserver: HTTP
     assert len(httpserver.log) == 2 * CONCURRENT
 
 
+def _spent(input_tokens: int, output_tokens: int) -> str:
+    """A reply whose single noul answer is fine and whose `usage` is what is under test."""
+    return json.dumps(
+        {
+            "model": MODEL,
+            "answers": {"q0": {"type": "noul", "noul": 0.95}},
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        }
+    )
+
+
+VIOLATIONS = [noul_reply(1.5), _spent(-1, 20), _spent(296, -1)]
+"""Bodies the schema refuses: a probability outside the unit, then a negative token count
+either way round. `spec/schema/response.json` sets `minimum: 0` on both counts, and an
+unchecked one would land on `gen_ai.usage.*` as a negative."""
+
+VIOLATION_IDS = ["probability_above_one", "negative_input_tokens", "negative_output_tokens"]
+
+
+@pytest.mark.parametrize("body", VIOLATIONS, ids=VIOLATION_IDS)
 def test_a_body_that_violates_the_contract_is_a_protocol_error(
-    httpserver: HTTPServer, runner: Runner
+    httpserver: HTTPServer, runner: Runner, body: str
 ) -> None:
-    expect_post(httpserver).respond_with_data(noul_reply(1.5), content_type=JSON)
+    expect_post(httpserver).respond_with_data(body, content_type=JSON)
     with pytest.raises(ProtocolError) as raised:
         _ = runner.ask(noul("Urgent?"), TICKET, lambda builder: builder.max_retries(0))
     assert raised.value.kind == "protocol"
@@ -537,6 +558,18 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
     _ = score_levels("How cross?", "abc")
 
 
+def _events_log_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Asking for log records where `opentelemetry-api` has no logs API is refused where
+    # it is asked for. The alternative is a guide that emits none and never says so.
+    without_the_logs_api(monkeypatch)
+    _ = GuideBuilder().api_key(ApiKey("k")).events("log")
+
+
+def _events_both_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    without_the_logs_api(monkeypatch)
+    _ = GuideBuilder().api_key(ApiKey("k")).events("both")
+
+
 @pytest.mark.parametrize(
     "build",
     [
@@ -547,6 +580,8 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
         _an_api_key_of_spaces,
         _an_empty_model,
         _levels_given_as_one_string,
+        _events_log_without_the_logs_api,
+        _events_both_without_the_logs_api,
     ],
     ids=[
         "credentialed_base_url",
@@ -556,6 +591,8 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
         "api_key_of_spaces",
         "empty_model",
         "levels_given_as_one_string",
+        "events_log_without_the_logs_api",
+        "events_both_without_the_logs_api",
     ],
 )
 def test_a_configuration_mistake_is_refused_before_a_guide_exists(

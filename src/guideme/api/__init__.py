@@ -74,6 +74,12 @@ type Unit = Annotated[float, Field(ge=0.0, le=1.0)]
 """A probability or a confidence as it arrives: outside `0..=1` it fails at parse time."""
 
 
+type Count = Annotated[int, Field(ge=0)]
+"""A token count as it arrives. `spec/schema/response.json` sets `minimum: 0` and the Rust
+mirror reads a `u64`, so a negative is a malformed body, refused at parse time rather than
+carried onto `gen_ai.usage.*`."""
+
+
 class NoulCriteria(_Sent):
     """What a yes and a no mean.
 
@@ -171,8 +177,8 @@ type Answer = Annotated[NoulAnswer | ChoiceAnswer | ScoreAnswer, Field(discrimin
 class Usage(_Received):
     """Token usage for one request. Input tokens are billed; output tokens are free."""
 
-    input_tokens: int
-    output_tokens: int
+    input_tokens: Count
+    output_tokens: Count
 
 
 class Response(_Received):

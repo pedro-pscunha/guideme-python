@@ -54,6 +54,27 @@ jobs:
       - name: mise run check
         run: mise run check
 
+      # `twine check` reads the metadata; it never installs anything. This takes
+      # the wheel the gate just built, puts it in an empty environment with no
+      # source tree to fall back on, and imports it. Nothing else proves that
+      # what a user downloads works, or that py.typed survived the build.
+      - name: Install the built wheel and import it
+        run: |
+          uv venv /tmp/wheel-check
+          VIRTUAL_ENV=/tmp/wheel-check uv pip install dist/*.whl
+          cd /tmp
+          /tmp/wheel-check/bin/python - <<'PY'
+          import pathlib
+
+          import guideme
+
+          assert guideme.Guide
+          installed = pathlib.Path(guideme.__file__).parent
+          marker = installed / "py.typed"
+          assert marker.is_file(), f"no py.typed in {installed}"
+          print(f"imported {installed}; py.typed present")
+          PY
+
   # The tracked pre-commit and pre-push hooks scan for secrets, but a hook is
   # opt-in and local. This is the copy that runs on every pull request, fork
   # included, and on every commit that reaches main.
@@ -125,6 +146,50 @@ jobs:
         run: |
           uv run --locked python -c "import sys; assert sys.version_info[:3] == (3, 12, 0), sys.version"
           uv run --locked pytest
+
+  # Every other job resolves from uv.lock, which pins opentelemetry-api at the
+  # floor of the range pyproject allows. The range users actually install is
+  # therefore never exercised, and the logs API this package reaches for lives at
+  # the private `opentelemetry._logs`. This job resolves the dependencies fresh,
+  # ignoring the lock, so a release that moves something is seen here first.
+  #
+  # `uv sync --upgrade` is what re-resolves. `uv run --resolution highest` does
+  # not: the committed lock already records the `highest` mode, so uv reuses it
+  # and the job would silently test the pinned versions again. Measured against a
+  # lock holding a deliberately stale certifi -- `--upgrade` moved it, the other
+  # kept it.
+  #
+  # Deliberately NOT in the required-checks ruleset: a third party's release
+  # should never block a merge here. It is an early warning, and a failure is a
+  # ticket, not a gate.
+  latest-deps:
+    name: latest-deps (unpinned)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # The workflow-wide UV_LOCKED=1 is the opposite of this job's purpose. It has
+      # to be turned off with a value uv can parse: an empty string is rejected as
+      # `expected a boolish value`, not read as unset.
+      UV_LOCKED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: Resolve every dependency at its newest allowed version
+        run: uv sync --upgrade --all-groups
+
+      - name: What it resolved
+        run: uv pip list
+
+      # The import is the half that a moved `opentelemetry._logs` would break for
+      # every user, traces included; the tracing suite is the half that proves the
+      # logs signal still emits what docs/observability.md documents.
+      - name: import guideme
+        run: uv run --no-sync python -c "import guideme; print(guideme.Guide)"
+
+      - name: pytest tests/test_tracing.py
+        run: uv run --no-sync pytest tests/test_tracing.py
 
   # spec/ is vendored from guideme-rust. This is the check the main ruleset
   # requires; advisories.yml re-runs it weekly so drift is caught between PRs.
