@@ -97,6 +97,18 @@ def _items(what: str, items: Sequence[str] | None, named: str) -> tuple[str, ...
     if blank:
         detail = f"{what!r}: empty {named[:-1]} {blank[0]!r}; every entry must say something"
         raise ConfigError(detail)
+    # Blank wins over this, which strip-first already gives: an item of one newline is
+    # empty, not broken. The test is the literal codepoint, never `splitlines()`, which
+    # here would also split on CR, VT, FF, FS, NEL, U+2028 and U+2029 and refuse seven
+    # declarations the Rust SDK accepts.
+    broken = [item for item in values if "\n" in item or "\r" in item]
+    if broken:
+        detail = (
+            f"{what!r}: {named[:-1]} {broken[0]!r} contains a line break; items are joined "
+            f"with '; ' onto one line, and a newline in one would read as a clause the "
+            f"rubric never declared"
+        )
+        raise ConfigError(detail)
     seen: set[str] = set()
     for item in values:
         if item in seen:

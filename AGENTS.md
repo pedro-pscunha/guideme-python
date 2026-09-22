@@ -122,7 +122,10 @@ the rest are checked in review.
   or whitespace-only entry, a repeat within one clause, a clause given as one string rather
   than a sequence of them, an empty clause written out (`examples` and `counterexamples`
   default to `None`, so any empty sequence was typed), examples attached to a blank rubric,
-  a `fallback(…)` on a runtime path, and a counterexample on a level are each a `ConfigError`.
+  a `fallback(…)` on a runtime path, a `U+000A` or `U+000D` inside an entry, and a
+  counterexample on a level are each a `ConfigError`. The newline test is the literal
+  codepoint, never `str.splitlines()`, which splits on eight and would refuse declarations the
+  Rust SDK accepts; `docs/contract.md` records why.
   A blank rubric that carries no examples is **not** an error: it means what it meant in 0.1.0,
   and this release does not redefine it. So are the two contradictions: one
   string as an example of two alternatives of the same question, and one string as both an

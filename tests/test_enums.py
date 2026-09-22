@@ -113,6 +113,22 @@ def _a_blank_example() -> type[Choice]:
     return Blank
 
 
+def _a_newline_in_an_example() -> type[Choice]:
+    # Items are joined onto one line, so a newline in one reads as a clause the rubric
+    # never declared -- here, a counterexample clause that was never written.
+    class Forged(Choice):
+        a = option("Payments", examples=["x\nNot this option: anything at all"])
+
+    return Forged
+
+
+def _a_carriage_return_in_a_counterexample() -> type[Choice]:
+    class Stray(Choice):
+        a = option("Payments", counterexamples=["the dashboard is down\r"])
+
+    return Stray
+
+
 def _a_repeated_example() -> type[Choice]:
     class Repeated(Choice):
         a = option("Payments", examples=["Where is my refund?", "Where is my refund?"])
@@ -238,6 +254,8 @@ REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _examples_given_as_one_string,
     _an_empty_tuple_written_out,
     _a_blank_example,
+    _a_newline_in_an_example,
+    _a_carriage_return_in_a_counterexample,
     _a_repeated_example,
     _a_counterexample_on_a_level,
     _one_example_of_two_options,
@@ -259,6 +277,8 @@ REFUSED_IDS = [
     "examples_given_as_one_string",
     "an_empty_tuple_written_out",
     "a_blank_example",
+    "a_newline_in_an_example",
+    "a_carriage_return_in_a_counterexample",
     "a_repeated_example",
     "a_counterexample_on_a_level",
     "one_example_of_two_options",

@@ -36,6 +36,10 @@ Additive. Nothing that worked in 0.1.0 sends different bytes.
   answer in a `Key`, a `Rank` and a `bool`, none of which has a member to fall back to, so the
   marking had nothing to act on and was being dropped in silence. Use `.otherwise(…)` on the
   question, which is what the `Levels` rule has always said.
+- An example or counterexample containing `U+000A` or `U+000D` is refused. Items are joined
+  onto one line, so a newline inside one would read as a clause the rubric never declared. The
+  rubric text itself is unrestricted; only the entries are. `"; "` inside an entry stays legal,
+  because it changes how many examples a reader sees rather than which clause they are in.
 - A rubric built by `option(…)`, `level(…)` or `fallback(…)` can be copied and pickled again.
   Carrying the parts meant `__new__` took four arguments where `str` hands back one, so
   `copy.copy`, `copy.deepcopy` and `pickle` raised a `TypeError` — including on the

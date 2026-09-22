@@ -171,9 +171,15 @@ scale — an input that does not belong at one level scores at another.
 Leave a clause out to say there is none. An empty one written out — `examples=[]` or
 `examples=()` — says nothing, so it is refused as the mistake it is, along with a clause given
 as one string rather than a list of them (`examples="refund"` would otherwise be six one-letter
-examples), a blank entry, a repeat within one clause, a counterexample on a level, a
-`fallback(…)` given to `choose_among`, `score_levels` or `.criteria(…)`, and the two
-contradictions above. Each is a `ConfigError` where the rubric is written.
+examples), a blank entry, a repeat within one clause, a newline or carriage return inside an
+entry, a counterexample on a level, a `fallback(…)` given to `choose_among`, `score_levels` or
+`.criteria(…)`, and the two contradictions above. Each is a `ConfigError` where the rubric is
+written.
+
+Entries go on one line each, so a newline inside one would read as a clause you never wrote.
+`"; "` inside an entry is fine — `"card declined; retry failed"` is ordinary prose, and it
+changes how many examples a reader sees rather than which clause they are in. The rubric text
+itself may still contain newlines; only the entries are restricted.
 
 Attaching examples to a blank rubric is refused too, because they describe something that is not
 there. A blank rubric on its own is not: it means what it has always meant, and adding examples
