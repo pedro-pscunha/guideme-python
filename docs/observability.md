@@ -115,16 +115,18 @@ this at `WARN`, here the event's presence is the signal.
 | `guideme.retry.delay_ms` | int | how long guideme is about to wait |
 
 **Exactly one of the first two is on every event, and neither is ever a placeholder.** An
-attempt is resent either because the API answered `429` or `529`, or because the request
-never reached a server at all: a refused connection, a reset, a failed TLS handshake, a
-connect timeout. Those two are different incidents — a throttled API and an unreachable one
-— and a dashboard grouping retries by cause must be able to tell them apart, so the cause is
-the field that is present rather than a value inside one field. The attempt's own span is
-marked `error.type = transport` for the second case, as it already is for a transport
-failure that is not resent.
+attempt is resent either because the API answered `429` or `529`, or because the connection
+failed: refused, reset, or a TLS handshake that did not complete. Those two are different
+incidents — a throttled API and an unreachable one — and a dashboard grouping retries by
+cause must be able to tell them apart, so the cause is the field that is present rather than
+a value inside one field. The attempt's own span is marked `error.type = transport` for the
+second case, as it already is for a transport failure that is not resent.
 
-A read timeout, a disconnect part-way through a response, and a body that will not decode
-produce no retry event: none of them is resent, because the request reached the server.
+A timeout of any phase, a disconnect part-way through a response, and a body that will not
+decode produce no retry event, because none of them is resent. The attempt span still
+carries `error.type = transport` for them; only the retry event is absent, and its absence
+is what says the call ended there. `docs/contract.md` has the reasoning, including why a
+connect-phase timeout is excluded although `httpx` can name it.
 
 ### Log records
 

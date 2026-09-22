@@ -36,11 +36,14 @@ Everything else is additive.
 - `GET /v1/models` is retried on `429` and `529`, through the same loop and the same spans an
   ask uses. The API's docs say an SDK handles a `429` for you, and a `429` during startup used
   to fail the start.
-- A connection failure is retried inside the same `max_retries` budget and backoff:
-  `httpx.ConnectError` and `httpx.ConnectTimeout`, which mean the request never reached a
-  server, so nothing was judged and nothing is repeated. A read timeout, a disconnect
-  part-way through a response and a body that will not decode are still not retried — the
-  request arrived, and a resend would buy the same judgment twice.
+- A failed connection is retried inside the same `max_retries` budget and backoff:
+  `httpx.ConnectError`, which means the request never reached a server, so nothing was
+  judged and nothing is repeated. A disconnect part-way through a response and a body that
+  will not decode are still not retried — the request arrived, and a resend would buy the
+  same judgment twice. **No timeout is retried, of any phase**, `httpx.ConnectTimeout`
+  included: Rust sets one deadline over the whole attempt and cannot tell a connect timeout
+  from a read one, so retrying it here would make the two SDKs disagree about the same
+  failure, and a retried timeout multiplies the wall time `timeout(…)` exists to bound.
 - `guideme.__all__` gains `Question`, `NoulQuestion`, `ChoiceQuestion`, `ScoreQuestion`,
   `DetailedNoul`, `DetailedChoice`, `DetailedScore`, `Receipt` and `Usage`, reaching 44 names.
   Annotating a stored question no longer means importing from a module the README calls

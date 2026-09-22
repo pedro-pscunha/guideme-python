@@ -225,14 +225,22 @@ def resend_after(error: httpx.HTTPError, attempt: int, retry: RetryPolicy) -> ti
     connection failure, or the budget for them is spent. The budget is the one `step`
     spends on a `429`, so a call cannot exceed `max_retries + 1` attempts by mixing them.
 
-    Only connecting is resent. A refused connection, a reset, a TLS handshake that failed
-    and a connect timeout all mean the request never reached a server, so nothing was
-    judged and nothing is repeated by trying again. A read timeout and a disconnect
-    part-way through a response mean the opposite: the request arrived, the API may have
-    answered it, and a resend would ask for the same judgment a second time. A body that
-    fails to decode is not here at all; it arrived, and it is a `ProtocolError`.
+    Only `httpx.ConnectError` is resent: a refused or reset connection, or a TLS handshake
+    that failed. The request never reached a server, so nothing was judged and nothing is
+    repeated by trying again. A read timeout and a disconnect part-way through a response
+    mean the opposite: the request arrived, the API may have answered it, and a resend
+    would ask for the same judgment a second time. A body that fails to decode is not here
+    at all; it arrived, and it is a `ProtocolError`.
+
+    **A timeout is never resent, whatever phase it names.** `httpx.ConnectTimeout` looks
+    like a connection failure and is excluded anyway, for two reasons. Rust has no such
+    case to exclude: `reqwest` sets one deadline over the whole attempt, so a connect-phase
+    timeout there is `is_timeout()` and not `is_connect()`, and retrying one here would be
+    the two SDKs disagreeing about the same failure. And a retried timeout multiplies the
+    wall time `GuideBuilder.timeout` promises, which is the one number a caller sets to
+    bound how long a call may take.
     """
-    if not isinstance(error, httpx.ConnectError | httpx.ConnectTimeout):
+    if not isinstance(error, httpx.ConnectError):
         return None
     if attempt >= retry.max_retries:
         return None

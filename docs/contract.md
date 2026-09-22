@@ -191,11 +191,21 @@ id that answered, never the alias that was asked for — and its `usage`, the `i
 
 **Retry policy.** `429` and `529` are retried with exponential backoff honouring an integer
 `retry-after`, on `POST /v1/systemone` and on `GET /v1/models` alike. A connection failure —
-the request never reached a server: connect refused or reset, TLS handshake, connect timeout —
-is retried inside the same budget. A read timeout and a body failure are not: the request
-arrived, so a resend may ask for a judgment that was already made. After the last retry a
-`429` is a rate-limited error carrying the `retry-after` and a `529` is an overloaded error
-carrying it too.
+the request never reached a server: connect refused or reset, TLS handshake failure — is
+retried inside the same budget. **A timeout of any phase** (connect, read, write) and a body
+failure are not.
+
+The timeout rule is the one place where the wider language wins and the narrower one is held
+to it. Rust sets a single deadline over the whole attempt, under which a connect-phase
+timeout is indistinguishable from a read timeout: `reqwest` reports it as `is_timeout()`, not
+`is_connect()`. Python can tell them apart — `httpx.ConnectTimeout` is its own class — and
+declines to, because an SDK that resent one failure the other could not see would be the two
+disagreeing about the same incident. A retried timeout also multiplies the wall time the
+builder's `timeout` promises, which is the one number a caller sets to bound a call. So the
+contract excludes every timeout and both SDKs implement that exclusion.
+
+After the last retry a `429` is a rate-limited error carrying the `retry-after` and a `529`
+is an overloaded error carrying it too.
 
 ### One divergence, and it is the language's
 

@@ -416,12 +416,18 @@ class BeforeAResponse:
 
 NEVER_REACHED = [
     BeforeAResponse(_failing(httpx.ConnectError, "connection refused"), 2, answered=True),
-    BeforeAResponse(_failing(httpx.ConnectTimeout, "connect timed out"), 2, answered=True),
+    BeforeAResponse(_failing(httpx.ConnectTimeout, "connect timed out"), 1, answered=False),
     BeforeAResponse(_failing(httpx.ReadTimeout, "read timed out"), 1, answered=False),
+    BeforeAResponse(_failing(httpx.PoolTimeout, "waited for a connection"), 1, answered=False),
     BeforeAResponse(_failing(httpx.RemoteProtocolError, "server hung up"), 1, answered=False),
 ]
-"""Connecting never reached a server, so it is safe to resend. A read timeout and a
-disconnect mid-response mean the request did reach one, which may already have judged it."""
+"""A refused or reset connection is safe to resend: it never reached a server, so nothing
+was judged. Everything else here is not. A read timeout and a disconnect mid-response mean
+the request did arrive and may already have been judged. A timeout of any phase is excluded
+whatever phase it names, because `httpx.ConnectTimeout` has no counterpart in Rust: one
+`reqwest` deadline covers the whole attempt, so a connect-phase timeout there is
+indistinguishable from a read timeout, and retrying it would also multiply the wall time
+the builder promises. Retrying it here and not there would be the SDKs disagreeing."""
 
 
 @final
@@ -442,9 +448,15 @@ class _Flaky:
 @pytest.mark.parametrize(
     "case",
     NEVER_REACHED,
-    ids=["connect_error", "connect_timeout", "read_timeout", "remote_protocol_error"],
+    ids=[
+        "connect_error",
+        "connect_timeout",
+        "read_timeout",
+        "pool_timeout",
+        "remote_protocol_error",
+    ],
 )
-def test_only_a_failure_that_never_reached_a_server_is_resent(
+def test_only_a_failed_connection_is_resent_and_no_timeout_ever_is(
     runner: Runner, spans: Recorded, case: BeforeAResponse
 ) -> None:
     flaky = _Flaky(case.fail)

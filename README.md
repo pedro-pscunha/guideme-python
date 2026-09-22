@@ -370,7 +370,8 @@ def test_an_urgent_ticket_is_prioritised() -> None:
 
 `q0` is the first question in encounter order; a batch of three is answered with `q0`, `q1`
 and `q2`. Raise from the handler instead of returning and you get the failure paths: an
-`httpx.ConnectError` is resent inside the retry budget, an `httpx.ReadTimeout` is not. For
+`httpx.ConnectError` is resent inside the retry budget, and an `httpx.ReadTimeout`, an
+`httpx.ConnectTimeout` or an `httpx.RemoteProtocolError` is not. For
 `AsyncGuide`, hand the same `httpx.MockTransport` to `async_transport(…)` and `build_async()`;
 it is both kinds of transport at once.
 
@@ -441,11 +442,16 @@ and the value of `error.type` on the failed span.
 Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and honour an
 integer `retry-after`. They apply to `models()` as much as to `ask`.
 
-A failure that never reached a server is resent in the same budget: a refused connection, a
-reset, a TLS handshake that failed, a connect timeout. Nothing was judged, so nothing is
-repeated. A read timeout and a disconnect part-way through a response are **not** resent —
-the request arrived, the API may have answered it, and asking again would buy the same
-judgment twice. Those raise `TransportError` on the first failure.
+A failed connection is resent in the same budget: refused, reset, or a TLS handshake that did
+not complete. The request never reached a server, so nothing was judged and nothing is
+repeated. A disconnect part-way through a response is **not** resent — the request arrived,
+the API may have answered it, and asking again would buy the same judgment twice.
+
+**No timeout is resent, of any phase.** A connect timeout included, although `httpx` names it
+separately: Rust's SDK sets one deadline over the whole attempt and cannot tell a connect
+timeout from a read timeout, so retrying one here would make the two SDKs disagree about the
+same failure, and a retried timeout multiplies the wall time `timeout(…)` is there to bound.
+Everything not resent raises `TransportError` on the first failure.
 
 ## Lower layers
 

@@ -92,11 +92,18 @@ Each module survives the test.
   `asyncio.run` rather than adding a pytest plugin.
 - **Jitter comes from the standard library.** `random.SystemRandom`, so backoff needs no extra
   dependency and does not disturb a caller who seeded the global `random`.
-- **Only a failure that never reached a server is resent.** `httpx.ConnectError` and
-  `httpx.ConnectTimeout` mean the request did not arrive, so nothing was judged and a resend
-  repeats nothing. A read timeout, a `RemoteProtocolError` and a body that will not decode all
-  mean it did arrive: the API may have answered and billed it, and asking again would buy the
-  same judgment twice. Idempotency is the line, not whether the failure looks transient.
+- **Only a failed connection is resent, and no timeout ever is.** `httpx.ConnectError` means
+  the request did not arrive, so nothing was judged and a resend repeats nothing. A
+  `RemoteProtocolError` and a body that will not decode mean it did arrive: the API may have
+  answered and billed it, and asking again would buy the same judgment twice. Idempotency is
+  the line, not whether the failure looks transient.
+  `httpx.ConnectTimeout` is the interesting exclusion, because idempotency alone would let it
+  through. It is excluded because the contract is shared and Rust cannot draw that line:
+  `reqwest` sets one deadline over the attempt, so a connect-phase timeout is `is_timeout()`
+  there and not `is_connect()`. An SDK that resent a failure the other could not even see
+  would be the two disagreeing about one incident. The second reason stands on its own: a
+  retried timeout multiplies the wall time `timeout(…)` is set to bound, and `httpx` already
+  spends that budget per phase, so the worst case is long enough without resending it.
 - **A transport is injectable and refuses a timeout beside it.** `transport(…)` gives a caller
   a proxy, a client certificate or an `httpx.MockTransport`, which is what makes their own
   control flow testable without a server. `httpx` hands a transport the client's timeout as a
