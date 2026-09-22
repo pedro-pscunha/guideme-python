@@ -99,6 +99,33 @@ def _a_repeated_example() -> type[Choice]:
     return Repeated
 
 
+def _one_example_of_two_options() -> type[Choice]:
+    class Shared(Choice):
+        billing = option("Payments", examples=["Where is my refund?"])
+        technical = option("Bugs", examples=["Where is my refund?"])
+
+    return Shared
+
+
+def _one_example_of_two_levels() -> type[Levels]:
+    class Shared(Levels):
+        cosmetic = level("No impact", examples=["a typo in a label"])
+        blocking = level("No workaround exists", examples=["a typo in a label"])
+
+    return Shared
+
+
+def _an_example_that_is_also_a_counterexample() -> type[Choice]:
+    class Both(Choice):
+        billing = option(
+            "Payments",
+            examples=["Where is my refund?"],
+            counterexamples=["Where is my refund?"],
+        )
+
+    return Both
+
+
 def _a_counterexample_on_a_level() -> type[Levels]:
     class Marked(Levels):
         cosmetic = option("No impact", counterexamples=["cannot log in"])
@@ -177,6 +204,9 @@ REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _a_blank_example,
     _a_repeated_example,
     _a_counterexample_on_a_level,
+    _one_example_of_two_options,
+    _one_example_of_two_levels,
+    _an_example_that_is_also_a_counterexample,
 ]
 
 REFUSED_IDS = [
@@ -193,6 +223,9 @@ REFUSED_IDS = [
     "a_blank_example",
     "a_repeated_example",
     "a_counterexample_on_a_level",
+    "one_example_of_two_options",
+    "one_example_of_two_levels",
+    "an_example_that_is_also_a_counterexample",
 ]
 
 

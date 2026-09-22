@@ -106,10 +106,11 @@ the TypeSafe docs describe.
 
 ### Examples in a rubric
 
-Two options that read alike are told apart by showing inputs rather than by describing harder.
-`option(…)` takes the inputs that belong to an option and the ones that belong somewhere else,
-`level(…)` takes the inputs that score at that level, and `fallback(…)` is an `option(…)` that
-also marks the unsure member.
+Two alternatives that read alike are told apart by showing inputs rather than by describing
+harder. `option(…)` takes the inputs that belong to an alternative and the ones that belong
+somewhere else, `level(…)` takes the inputs that score at that level, and `fallback(…)` is an
+`option(…)` that also marks the unsure member. All three kinds of question take them: a noul's
+`.criteria(…)` accepts an `option(…)` for the yes and for the no.
 
 ```python
 from guideme import Choice, Levels, fallback, level, option
@@ -141,13 +142,21 @@ Not this option: The dashboard is down
 ```
 
 So a rubric with no examples sends exactly what it sent before, and the same strings work in
-`choose_among("…", {"billing": option(…)})` and `score_levels("…", [level(…), …])`. A string
-may be an example of one option and a counterexample of another: that is the point when two
-options are confusable. `level(…)` has no counterexamples, because "not this option" means
-nothing on an ordered scale — an input that does not belong at one level scores at another.
+`choose_among("…", {"billing": option(…)})`, `score_levels("…", [level(…), …])` and
+`noul("…").criteria(option(…), option(…))`. Examples and counterexamples render in the order
+they are written, always: that order is part of the published contract.
 
-A blank rubric, a blank or repeated example, an `examples=[]` written out, and a counterexample
-on a level are each a `ConfigError` where the rubric is written.
+A string may be an example of one option and a counterexample of another. That is the point
+when two options are confusable, and it is the one overlap that stays legal. Offering the same
+string as an example of two options, or as both an example and a counterexample of the same
+option, says an input belongs where it cannot, so each is refused.
+
+`level(…)` has no counterexamples, because "not this option" means nothing on an ordered
+scale — an input that does not belong at one level scores at another.
+
+A blank or whitespace-only rubric or entry, a repeat within one clause, an `examples=[]`
+written out, a counterexample on a level, and the two contradictions above are each a
+`ConfigError` where the rubric is written.
 
 The state is anything JSON-shaped: a text literal, a `dict`, a list of them. A dataclass goes
 through `dataclasses.asdict`, a pydantic model through `.model_dump()`.

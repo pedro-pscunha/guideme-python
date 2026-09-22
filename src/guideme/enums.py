@@ -9,7 +9,7 @@ rubric that could not be asked is an error where it is written rather than on
 the first request.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from enum import Enum
 from typing import Self, final
 
@@ -92,12 +92,17 @@ def _rubric(
     if not rubric.strip():
         detail = f"a rubric must say something, got {rubric!r}"
         raise ConfigError(detail)
-    return _Rubric(
-        rubric,
-        _items(rubric, examples, "examples"),
-        _items(rubric, counterexamples, "counterexamples"),
-        is_fallback=is_fallback,
-    )
+    shown = _items(rubric, examples, "examples")
+    excluded = _items(rubric, counterexamples, "counterexamples")
+    both = [item for item in shown if item in set(excluded)]
+    if both:
+        detail = (
+            f"{rubric!r}: {both[0]!r} is both an example and a counterexample of it, which "
+            f"says the input does and does not belong here; it may be an example of one "
+            f"option and a counterexample of another, but not of the same one"
+        )
+        raise ConfigError(detail)
+    return _Rubric(rubric, shown, excluded, is_fallback=is_fallback)
 
 
 def option(
@@ -106,15 +111,20 @@ def option(
     examples: Sequence[str] = _UNSET,
     counterexamples: Sequence[str] = _UNSET,
 ) -> str:
-    """A choice option: what it covers, inputs that belong to it, inputs that do not.
+    """A described alternative: what it covers, inputs that belong to it, inputs that do not.
+
+    Use it for a `Choice` member, for a runtime option of `choose_among`, and for either
+    side of a noul's `.criteria(...)`; a yes and a no are as confusable as two options.
 
     The value is still the rubric text; the examples are composed into it where the
     rubric goes on the wire, so an option written as a bare string and one written as
-    `option("…")` send the same bytes. A string may be an example of one option and a
-    counterexample of another: that is how two confusable options are told apart.
+    `option("…")` send the same bytes, and both clauses keep the order they were
+    written in. A string may be an example of one alternative and a counterexample of
+    another: that is how two confusable ones are told apart.
 
-    An empty rubric, an empty entry, an `examples=[]` written out, or a repeat within
-    one clause is a `ConfigError` where the option is written.
+    A blank rubric or entry, an `examples=[]` written out, a repeat within one clause,
+    and a string given as both an example and a counterexample of this one alternative
+    are each a `ConfigError` where the option is written.
     """
     return _rubric(rubric, examples, counterexamples, is_fallback=False)
 
@@ -164,6 +174,28 @@ def render(rubric: str) -> str:
     if rubric.counterexamples:
         lines.append(NOT_THIS + "; ".join(rubric.counterexamples))
     return "\n".join(lines)
+
+
+def require_unshared_examples(where: str, rubrics: Iterable[tuple[str, str | None]]) -> None:
+    """Refuse one string offered as an example of two alternatives of the same question.
+
+    It would say the input belongs to both, which cannot be true. The reverse is legal
+    and is the point of the feature: the same string as an example of one alternative
+    and a counterexample of another is how two confusable ones are told apart.
+    """
+    seen: dict[str, str] = {}
+    for name, rubric in rubrics:
+        if not isinstance(rubric, _Rubric):
+            continue
+        for example in rubric.examples:
+            first = seen.setdefault(example, name)
+            if first != name:
+                detail = (
+                    f"{where}: {example!r} is an example of both {first} and {name}, so it "
+                    f"says one input belongs to two alternatives; make it a counterexample "
+                    f"of one of them instead"
+                )
+                raise ConfigError(detail)
 
 
 def require_no_counterexamples(where: str, rubric: str) -> None:
@@ -232,6 +264,7 @@ class Choice(Enum):
         if len(marked) > 1:
             detail = f"{cls.__name__}: only one member may be marked fallback, got {marked}"
             raise ConfigError(detail)
+        require_unshared_examples(cls.__name__, ((m.name, m.value) for m in cls))
 
     @classmethod
     def rubric(cls) -> tuple[tuple[str, str], ...]:
@@ -289,6 +322,7 @@ class Levels(Enum):
                 )
                 raise ConfigError(detail)
             require_no_counterexamples(f"{cls.__name__}.{member.name}", member.value)
+        require_unshared_examples(cls.__name__, ((m.name, m.value) for m in cls))
 
     @property
     def index(self) -> int:

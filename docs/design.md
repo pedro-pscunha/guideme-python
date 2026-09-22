@@ -112,14 +112,30 @@ Each module survives the test.
   composes them where the rubric becomes wire text — the wire schema, `spec/`, and every
   existing golden vector untouched.
 - **The rendered rubric is a contract item, and the renderer has one entry per wire site.**
-  Clauses join with a newline and items with `"; "`, and the text is used verbatim: a newline
-  rather than a space is what removes the need for a punctuation rule, since an example ending
-  in `?` would otherwise render as `Where is my refund?.`. `Choice.rubric()`, `Levels.levels()`,
-  `choose_among` and `score_levels` all render, so a value that reached a runtime constructor
-  cannot silently lose its examples. Rust renders the same string inside its derive macro,
-  which is the one deliberate asymmetry: `choose_among` here takes an `option(…)`, while Rust's
-  equivalent takes a string the macro already composed. Equivalent inputs put identical bytes
-  on the wire.
+  Clauses join with a newline and items with `"; "`, in the order written, and the text is used
+  verbatim: a newline rather than a space is what removes the need for a punctuation rule,
+  since an example ending in `?` would otherwise render as `Where is my refund?.`. The
+  `Not this option` label was measured against `Not` and `Counterexamples` and won.
+  `Choice.rubric()`, `Levels.levels()`, `choose_among`, `score_levels` and
+  `NoulQuestion.criteria` all render, so a value that reached a runtime constructor cannot
+  silently lose its examples. Rust renders the same string, which leaves one deliberate
+  asymmetry: `choose_among` here takes an `option(…)`, while Rust's equivalent keeps taking a
+  plain string rather than risk inference breakage for existing callers. Equivalent inputs put
+  identical bytes on the wire.
+- **A noul's criteria take examples too, and through the same `option(…)`.** A yes and a no are
+  two described alternatives of one question, exactly as confusable as two options of a choice,
+  and measurement says so: asked whether a nightly export job with a manual workaround is
+  urgent, plain `Urgent` / `Not urgent` answers yes at 0.75 four times running, and the same
+  criteria carrying examples answer no at 0.17. The examples move it to the correct answer,
+  because one of the no examples is the situation the state describes. So there is no fourth
+  constructor — `option(…)` is "a described alternative" and serves both — and `.criteria(…)`
+  renders like every other wire site.
+- **Contradictory examples are refused where they are written.** One string offered as an
+  example of two alternatives of the same question says an input belongs to both, which cannot
+  be true; one string offered as both an example and a counterexample of the same alternative
+  says it does and does not belong. Both are a `ConfigError`. The overlap that looks similar
+  and is the whole point stays legal: the same string as an example of one alternative and a
+  counterexample of another is how two confusable ones are told apart.
 - **An answer is a span event and a log record, and the caller picks.** Rust emits one
   `tracing` event and lets the subscriber fan it out, so its example filters events off the
   span exporter to store each one once. There is no subscriber here, so the library makes both

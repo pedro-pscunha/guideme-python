@@ -12,16 +12,24 @@ Additive. Nothing that worked in 0.1.0 sends different bytes.
   `fallback(…)`, which now takes the same keywords. All three are exported from `guideme`,
   bringing `__all__` to 35 names. A rubric written as a bare string keeps working everywhere.
 - The parts are composed into the rubric where it becomes wire text: clauses joined with a
-  newline, items within one joined with `"; "`, the text verbatim. A rubric with no examples
-  renders to its own text, byte for byte, so an existing request is unchanged. The rendered
-  string is a cross-SDK contract item, stated in `docs/contract.md` and pinned by
-  `spec/vectors/rubric.json`.
+  newline, items within one joined with `"; "`, in the order written, the text verbatim. A
+  rubric with no examples renders to its own text, byte for byte, so an existing request is
+  unchanged. The rendered string and its order are cross-SDK contract items, stated in
+  `docs/contract.md` and pinned by `spec/vectors/rubric.json`.
+- All three kinds of question take them. `noul("…").criteria(yes, no)` accepts an `option(…)`
+  for either side: a yes and a no are as confusable as two options, and there is no fourth
+  constructor for them.
 - Every site that puts a rubric on the wire renders — `Choice.rubric()`, `Levels.levels()`,
-  `choose_among` and `score_levels` — so examples cannot be silently dropped by reaching a
-  runtime constructor.
+  `choose_among`, `score_levels` and `NoulQuestion.criteria` — so examples cannot be silently
+  dropped by reaching a runtime constructor.
 - `level(…)` takes no counterexamples: "not this option" means nothing on an ordered scale. An
   `option(…)` carrying counterexamples written where a level belongs is a `ConfigError`, as is
-  a blank rubric, a blank or repeated example, and an `examples=[]` written out.
+  a blank or whitespace-only rubric or entry, a repeat within one clause, and an `examples=[]`
+  written out.
+- Contradictory examples are a `ConfigError` too: one string as an example of two alternatives
+  of the same question, or as both an example and a counterexample of the same alternative. One
+  string as an example of one alternative and a counterexample of another stays legal — that is
+  the confusable-options pattern the feature exists for.
 
 ## 0.1.0 — 2026-09-21
 

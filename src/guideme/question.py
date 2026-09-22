@@ -10,7 +10,13 @@ from dataclasses import dataclass, field, replace
 from typing import Self, final
 
 from guideme._json import Json
-from guideme.enums import Choice, Levels, render, require_no_counterexamples
+from guideme.enums import (
+    Choice,
+    Levels,
+    render,
+    require_no_counterexamples,
+    require_unshared_examples,
+)
 from guideme.errors import ConfigError, ProtocolError, UnsureError
 from guideme.policy import (
     MAX_LEVELS,
@@ -325,8 +331,14 @@ class NoulQuestion(_Binary[bool], _Fallible[bool]):
     """A yes/no question read as a `bool`."""
 
     def criteria(self, yes: str, no: str) -> Self:
-        """Describe what a yes and a no mean."""
-        return replace(self, spec=NoulSpec(NoulCriteria(yes, no)))
+        """Describe what a yes and a no mean.
+
+        Either may be an `option(...)` carrying examples, which are composed into it
+        here: a yes and a no are as confusable as two options of a choice, and showing
+        an input that belongs to each is what tells them apart.
+        """
+        require_unshared_examples("criteria", (("yes", yes), ("no", no)))
+        return replace(self, spec=NoulSpec(NoulCriteria(render(yes), render(no))))
 
     def detail(self) -> DetailedNoul:
         """Read the full `Verdict` instead. Any `.otherwise(...)` is dropped."""
@@ -436,6 +448,7 @@ def choose_among(instructions: Json, options: Mapping[str, str | None]) -> Choic
     A rubric is a string, `None`, or an `option(...)` carrying examples, which
     are composed into it here: the same text a `Choice` member would send.
     """
+    require_unshared_examples("choose_among", options.items())
     return _choice(
         instructions,
         tuple((key, None if text is None else render(text)) for key, text in options.items()),
@@ -484,4 +497,7 @@ def score_levels(instructions: Json, levels: Sequence[str]) -> ScoreQuestion[Ran
         raise ConfigError(detail)
     for index, text in enumerate(levels):
         require_no_counterexamples(f"level {index}", text)
+    require_unshared_examples(
+        "score_levels", ((f"level {index}", text) for index, text in enumerate(levels))
+    )
     return _score(instructions, tuple(render(text) for text in levels), Rank)

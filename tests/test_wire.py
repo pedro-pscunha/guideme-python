@@ -567,6 +567,26 @@ def _a_runtime_level_with_counterexamples(_monkeypatch: pytest.MonkeyPatch) -> N
     _ = score_levels("How cross?", [option("Calm", counterexamples=["shouting"]), "Cross"])
 
 
+def _one_example_of_two_runtime_options(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # One input cannot belong to two options. The reverse -- an example of one and a
+    # counterexample of another -- is legal and is what tells confusable options apart.
+    _ = choose_among(
+        "Which team?",
+        {
+            "billing": option("Money", examples=["Where is my refund?"]),
+            "technical": option("Bugs", examples=["Where is my refund?"]),
+        },
+    )
+
+
+def _one_example_of_both_noul_criteria(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # A yes and a no are two alternatives of one question, so the same rule holds there.
+    _ = noul("Urgent?").criteria(
+        option("Needs a person now", examples=["the export is broken"]),
+        option("Can wait", examples=["the export is broken"]),
+    )
+
+
 def _events_log_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
     # Asking for log records where `opentelemetry-api` has no logs API is refused where
     # it is asked for. The alternative is a guide that emits none and never says so.
@@ -606,6 +626,8 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         _an_empty_model,
         _levels_given_as_one_string,
         _a_runtime_level_with_counterexamples,
+        _one_example_of_two_runtime_options,
+        _one_example_of_both_noul_criteria,
         _events_log_without_the_logs_api,
         _events_both_without_the_logs_api,
         _events_log_with_a_drifted_log_record,
@@ -620,6 +642,8 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         "empty_model",
         "levels_given_as_one_string",
         "a_runtime_level_with_counterexamples",
+        "one_example_of_two_runtime_options",
+        "one_example_of_both_noul_criteria",
         "events_log_without_the_logs_api",
         "events_both_without_the_logs_api",
         "events_log_with_a_drifted_log_record",

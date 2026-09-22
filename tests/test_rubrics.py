@@ -3,7 +3,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pytest_httpserver import HTTPServer
 
-from guideme import Choice, Levels, choose, fallback, level, option, score
+from guideme import Choice, Levels, choose, fallback, level, noul, option, score
 from guideme.enums import render
 
 from .conftest import (
@@ -53,6 +53,20 @@ GOLDEN: list[tuple[str, str]] = [
         level(COSMETIC, examples=["typo in a label", "misaligned icon"]),
         f"{COSMETIC}\nExamples: typo in a label; misaligned icon",
     ),
+    # Both clauses are written out of alphabetical order, so a renderer that sorted or
+    # took a set would fail here. Declaration order is contract: two SDKs ordering
+    # differently would send different bytes for the same declaration.
+    (
+        option(
+            BILLING,
+            examples=["Where is my refund?", "My card was charged twice"],
+            counterexamples=["The dashboard is down", "A 502 on every request"],
+        ),
+        (
+            f"{BILLING}\nExamples: Where is my refund?; My card was charged twice"
+            f"\nNot this option: The dashboard is down; A 502 on every request"
+        ),
+    ),
 ]
 
 GOLDEN_IDS = [
@@ -62,6 +76,7 @@ GOLDEN_IDS = [
     "examples_and_a_counterexample",
     "a_counterexample_only",
     "a_level_with_examples",
+    "declaration_order_is_kept",
 ]
 
 
@@ -83,15 +98,19 @@ def test_a_rubric_with_no_parts_renders_byte_for_byte(what: str) -> None:
     assert render(fallback(what)) == what
 
 
+DASHBOARD = "The dashboard is down"
+"""An example of one option and a counterexample of another: the confusable pattern."""
+
+
 class Department(Choice):
     """A choice whose every member carries examples, one of them the fallback."""
 
     billing = option(
         BILLING,
         examples=["My card was charged twice", "Where is my refund?"],
-        counterexamples=["The dashboard is down"],
+        counterexamples=[DASHBOARD],
     )
-    technical = option(TECHNICAL, examples=["502 on every request"])
+    technical = option(TECHNICAL, examples=[DASHBOARD, "502 on every request"])
     sales = fallback("Pricing, upgrades, new accounts", examples=["Do you have a team plan?"])
 
 
@@ -117,15 +136,16 @@ ANSWERS: dict[str, Json] = {
         "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1},
         "confidence": 0.9,
     },
+    "q2": {"type": "noul", "noul": 0.2},
 }
 """One answer per question of the batch below, over its own keys and levels."""
 
 CHOICE_CRITERIA: Json = {
     "billing": (
         f"{BILLING}\nExamples: My card was charged twice; Where is my refund?"
-        f"\nNot this option: The dashboard is down"
+        f"\nNot this option: {DASHBOARD}"
     ),
-    "technical": f"{TECHNICAL}\nExamples: 502 on every request",
+    "technical": f"{TECHNICAL}\nExamples: {DASHBOARD}; 502 on every request",
     "sales": "Pricing, upgrades, new accounts\nExamples: Do you have a team plan?",
 }
 """What `Department` must put on the wire, key by key."""
@@ -137,6 +157,12 @@ SCORE_CRITERIA: Json = [
 ]
 """What `Severity` must put on the wire, low to high."""
 
+NOUL_CRITERIA: Json = {
+    "true": "Needs a person now\nExamples: the whole site is down",
+    "false": "Can wait\nExamples: a broken job someone has a manual workaround for",
+}
+"""What a noul's described criteria must put on the wire, under the wire's own names."""
+
 
 def test_examples_reach_the_wire_as_the_rendered_criteria(
     httpserver: HTTPServer, runner: Runner
@@ -145,8 +171,12 @@ def test_examples_reach_the_wire_as_the_rendered_criteria(
     batch = (
         choose(Department, "Which team should handle this?"),
         score(Severity, "How bad is it?"),
+        noul("Is this urgent?").criteria(
+            option("Needs a person now", examples=["the whole site is down"]),
+            option("Can wait", examples=["a broken job someone has a manual workaround for"]),
+        ),
     )
-    assert runner.ask(batch, TICKET) == (Department.technical, Severity.degraded)
+    assert runner.ask(batch, TICKET) == (Department.technical, Severity.degraded, False)
 
     request, _ = httpserver.log[-1]
     body = as_object(narrow(request.get_json()))
@@ -154,5 +184,7 @@ def test_examples_reach_the_wire_as_the_rendered_criteria(
     questions = as_object(body["questions"])
     assert as_object(questions["q0"])["criteria"] == CHOICE_CRITERIA
     assert as_object(questions["q1"])["criteria"] == SCORE_CRITERIA
-    # A fallback marked with examples is still the fallback.
+    assert as_object(questions["q2"])["criteria"] == NOUL_CRITERIA
+    # A fallback marked with examples is still the fallback, and `The dashboard is down`
+    # went out as an example of one option and a counterexample of another.
     assert Department.fallback_member() is Department.sales

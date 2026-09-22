@@ -109,13 +109,22 @@ the rest are checked in review.
 - **A rubric's examples are composed into its text at the wire, and nowhere else.** A rubric's
   value stays the bare text; `enums.render` is what turns an `option(…)`, `level(…)` or
   `fallback(…)` into what the model reads, and every site that puts a rubric on the wire —
-  `Choice.rubric()`, `Levels.levels()`, `choose_among`, `score_levels` — goes through it, so a
-  rubric cannot arrive having quietly lost what it carries. A bare string and a rubric with no
-  examples render to their own bytes, so an existing caller's request does not move. The
-  rendered string is a contract item shared with every other SDK, stated in `docs/contract.md`
-  and pinned by `spec/vectors/rubric.json`. A blank rubric, a blank or repeated example, an
-  `examples=[]` written out, and a counterexample on a level are each a `ConfigError` where the
-  rubric is written.
+  `Choice.rubric()`, `Levels.levels()`, `choose_among`, `score_levels` and
+  `NoulQuestion.criteria` — goes through it, so a rubric cannot arrive having quietly lost what
+  it carries. All three kinds of question take examples: a yes and a no are as confusable as
+  two options, and `option(…)` is the one constructor for a described alternative, so there is
+  no fourth. A bare string and a rubric with no examples render to their own bytes, so an
+  existing caller's request does not move. The rendered string is a contract item shared with
+  every other SDK, stated in `docs/contract.md` and pinned by `spec/vectors/rubric.json`, and
+  so is the order: examples and counterexamples render in the order written, never sorted and
+  never de-duplicated into a set.
+- **A rubric's examples must be consistent, and that is checked where it is written.** A blank
+  or whitespace-only rubric or entry, a repeat within one clause, an `examples=[]` written out,
+  and a counterexample on a level are each a `ConfigError`. So are the two contradictions: one
+  string as an example of two alternatives of the same question, and one string as both an
+  example and a counterexample of the same alternative. One string as an example of one
+  alternative and a counterexample of another is **legal and required** — it is the confusable
+  pattern the feature exists for, and `tests/test_rubrics.py` sends it on the wire.
 - **Nothing outside `api/` may see a `pydantic` exception.** A caller's state or instructions
   that pydantic refuses leaves `api/` as a `ConfigError`, and a `NaN` or an infinity is refused
   rather than serialised as `null`.
