@@ -119,9 +119,12 @@ the rest are checked in review.
   so is the order: examples and counterexamples render in the order written, never sorted and
   never de-duplicated into a set.
 - **A rubric's examples must be consistent, and that is checked where it is written.** A blank
-  or whitespace-only rubric or entry, a repeat within one clause, an empty clause written out
-  (`examples` and `counterexamples` default to `None`, so any empty sequence was typed),
-  and a counterexample on a level are each a `ConfigError`. So are the two contradictions: one
+  or whitespace-only entry, a repeat within one clause, a clause given as one string rather
+  than a sequence of them, an empty clause written out (`examples` and `counterexamples`
+  default to `None`, so any empty sequence was typed), examples attached to a blank rubric,
+  a `fallback(…)` on a runtime path, and a counterexample on a level are each a `ConfigError`.
+  A blank rubric that carries no examples is **not** an error: it means what it meant in 0.1.0,
+  and this release does not redefine it. So are the two contradictions: one
   string as an example of two alternatives of the same question, and one string as both an
   example and a counterexample of the same alternative. One string as an example of one
   alternative and a counterexample of another is **legal and required** — it is the confusable

@@ -71,9 +71,11 @@ def _one_level() -> type[Levels]:
     return OneLevel
 
 
-def _a_blank_rubric() -> type[Choice]:
+def _examples_attached_to_a_blank_rubric() -> type[Choice]:
+    # The blank rubric alone is legal and means what it always meant. Attaching
+    # examples to it is the mistake: they describe something that is not there.
     class Blank(Choice):
-        a = option("   ")
+        a = option("   ", examples=["My card was charged twice"])
 
     return Blank
 
@@ -217,7 +219,7 @@ REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _duplicate_choice_rubric,
     _duplicate_level_rubric,
     _fallback_on_a_level,
-    _a_blank_rubric,
+    _examples_attached_to_a_blank_rubric,
     _an_examples_clause_written_empty,
     _examples_given_as_one_string,
     _an_empty_tuple_written_out,
@@ -238,7 +240,7 @@ REFUSED_IDS = [
     "two_options_with_the_same_rubric",
     "two_levels_with_the_same_rubric",
     "a_fallback_marker_on_a_levels",
-    "a_blank_rubric",
+    "examples_attached_to_a_blank_rubric",
     "an_examples_clause_written_empty",
     "examples_given_as_one_string",
     "an_empty_tuple_written_out",

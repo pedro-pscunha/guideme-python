@@ -97,12 +97,21 @@ def _rubric(
     *,
     is_fallback: bool,
 ) -> str:
-    """Check the parts and hold them on the rubric, unrendered."""
-    if not rubric.strip():
-        detail = f"a rubric must say something, got {rubric!r}"
-        raise ConfigError(detail)
+    """Check the parts and hold them on the rubric, unrendered.
+
+    A blank rubric is refused only when examples are attached to it. Attaching them
+    to nothing is the mistake; a blank rubric on its own was legal in 0.1.0, means
+    exactly what a bare `""` member means, and a patch release does not get to make
+    it an error.
+    """
     shown = _items(rubric, examples, "examples")
     excluded = _items(rubric, counterexamples, "counterexamples")
+    if (shown or excluded) and not rubric.strip():
+        detail = (
+            f"examples were attached to a blank rubric ({rubric!r}); they say what the "
+            f"rubric covers, so there has to be something for them to say it about"
+        )
+        raise ConfigError(detail)
     ruled_out = set(excluded)
     both = [item for item in shown if item in ruled_out]
     if both:
@@ -133,9 +142,11 @@ def option(
     another: that is how two confusable ones are told apart.
 
     Leave a clause out to say there is none. An empty one written out says nothing and
-    is refused: a blank rubric or entry, an `examples=[]`, a repeat within one clause,
-    and a string given as both an example and a counterexample of this one alternative
-    are each a `ConfigError` where the option is written.
+    is refused: an `examples=[]`, a clause given as one string rather than a sequence of
+    them, a blank entry, a repeat within one clause, a string given as both an example
+    and a counterexample of this one alternative, and examples attached to a blank
+    rubric are each a `ConfigError` where the option is written. A blank rubric with no
+    examples is not: that is what it has always meant.
     """
     return _rubric(rubric, examples, counterexamples, is_fallback=False)
 

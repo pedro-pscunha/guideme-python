@@ -169,9 +169,15 @@ option, says an input belongs where it cannot, so each is refused.
 scale — an input that does not belong at one level scores at another.
 
 Leave a clause out to say there is none. An empty one written out — `examples=[]` or
-`examples=()` — says nothing, so it is refused as the mistake it is, along with a blank or
-whitespace-only rubric or entry, a repeat within one clause, a counterexample on a level, and
-the two contradictions above. Each is a `ConfigError` where the rubric is written.
+`examples=()` — says nothing, so it is refused as the mistake it is, along with a clause given
+as one string rather than a list of them (`examples="refund"` would otherwise be six one-letter
+examples), a blank entry, a repeat within one clause, a counterexample on a level, a
+`fallback(…)` given to `choose_among`, `score_levels` or `.criteria(…)`, and the two
+contradictions above. Each is a `ConfigError` where the rubric is written.
+
+Attaching examples to a blank rubric is refused too, because they describe something that is not
+there. A blank rubric on its own is not: it means what it has always meant, and adding examples
+to the language does not make an old declaration an error.
 
 The state is anything JSON-shaped: a text literal, a `dict`, a list of them. A dataclass goes
 through `dataclasses.asdict`, a pydantic model through `.model_dump()`.

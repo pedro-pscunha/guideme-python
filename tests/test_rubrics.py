@@ -96,10 +96,16 @@ def test_a_rubric_renders_the_bytes_the_contract_names(
     assert str(rubric) == bare
 
 
-@given(st.text(min_size=1).filter(lambda text: bool(text.strip())))
+@given(st.text())
 def test_a_rubric_with_no_parts_renders_byte_for_byte(what: str) -> None:
     # The load-bearing invariant: 0.1.0's bytes do not move. A bare string and an
     # `option(...)` with nothing attached both render to the text itself.
+    #
+    # The strategy is unrestricted on purpose, blank and whitespace-only text
+    # included. A rubric carrying no examples is refused for nothing at all: it
+    # meant whatever it meant in 0.1.0 and a patch release does not redefine it.
+    # Attaching examples to a blank rubric is the error, and that case is in
+    # `tests/test_enums.py`'s refusal list.
     assert render(what) == what
     assert render(option(what)) == what
     assert render(level(what)) == what

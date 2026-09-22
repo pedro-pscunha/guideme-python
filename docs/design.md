@@ -166,16 +166,15 @@ Each module survives the test.
   equals `"x"`, so two options whose text matches are still one member however their examples
   differ, and a member's `.value` still reads as it was written. The expansion happens only in
   the request.
-- **A blank rubric is refused where examples can attach, and accepted where a bare string
-  always was.** `option("   ")` is a `ConfigError`, while a bare `""` reaching `choose_among`,
-  `score_levels` or a `Choice` member is not. The asymmetry is deliberate and it is a version
-  boundary, not an oversight: a bare blank rubric was legal in 0.1.0, and refusing it in a
-  patch release would break a caller who is doing nothing new. The new constructors have no
-  such history, so they are strict from the start. `guideme-rust` draws the same line from the
-  other side — its derive had made an empty `what` an unconditional compile error and narrowed
-  it to fire only when examples are attached, for this reason. A reader of both SDKs should
-  find the same rule: strict where examples are, unchanged where they are not. Revisit at a
-  major bump, together.
+- **A blank rubric is an error only when examples are attached to it.** `option("   ")` on its
+  own is accepted and means exactly what a bare `""` member has always meant;
+  `option("   ", examples=[…])` is a `ConfigError`. The first version of this refused any blank
+  rubric written through the new constructors, which read as tidy and was wrong: it made a
+  declaration that was legal in 0.1.0 illegal in a patch release, on a degenerate input that
+  was already meaningless. "You attached examples to nothing" is the real mistake; "your
+  description is blank" is not one this release gets to invent. `guideme-rust` narrowed the
+  same rule from the same starting point, so a reader of both finds one rule: strict where
+  examples are, untouched where they are not. Revisit at a major bump, together.
 - **A clause left out is `None`; an empty one was written on purpose.** `examples` and
   `counterexamples` default to `None`, which is how "there are none" is said, so any empty
   sequence that arrives was typed by the caller and says nothing — a `ConfigError`, whatever
