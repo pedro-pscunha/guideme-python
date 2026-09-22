@@ -57,6 +57,19 @@ class _Rubric(str):  # noqa: SLOT000 -- a str subclass may not carry non-empty _
         self.is_fallback = is_fallback
         return self
 
+    def __getnewargs_ex__(
+        self,
+    ) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], dict[str, bool]]:
+        """Hand `copy` and `pickle` every argument `__new__` needs, marking included.
+
+        `str`'s own `__getnewargs__` supplies the text alone, which is one argument
+        where this takes four, so without this a copied or pickled rubric raised a
+        `TypeError`. A bare `str` rubric copied fine in 0.1.0 and has to keep doing so:
+        `copy.deepcopy({"key": option(...)})` is exactly the shape a caller builds
+        before handing it to `choose_among`.
+        """
+        return (str(self), self.examples, self.counterexamples), {"is_fallback": self.is_fallback}
+
 
 def _items(what: str, items: Sequence[str] | None, named: str) -> tuple[str, ...]:
     """Check one clause's items: written means non-empty, each says something, no repeats.
@@ -77,16 +90,19 @@ def _items(what: str, items: Sequence[str] | None, named: str) -> tuple[str, ...
         )
         raise ConfigError(detail)
     if not items:
-        detail = f"{what!r}: {named}= is empty; a clause written on purpose must say something"
+        detail = f"{what!r}: empty {named}=; a clause written on purpose must say something"
         raise ConfigError(detail)
     values = tuple(items)
     blank = [item for item in values if not item.strip()]
     if blank:
-        detail = f"{what!r}: every entry in {named} must say something, got {blank[0]!r}"
+        detail = f"{what!r}: empty {named[:-1]} {blank[0]!r}; every entry must say something"
         raise ConfigError(detail)
-    if len(set(values)) != len(values):
-        detail = f"{what!r}: {named} repeats an entry; each must be distinct"
-        raise ConfigError(detail)
+    seen: set[str] = set()
+    for item in values:
+        if item in seen:
+            detail = f"{what!r}: duplicate {named[:-1]} {item!r}; each entry must be distinct"
+            raise ConfigError(detail)
+        seen.add(item)
     return values
 
 

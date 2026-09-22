@@ -1,3 +1,6 @@
+import copy
+import pickle
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -94,6 +97,11 @@ def test_a_rubric_renders_the_bytes_the_contract_names(
     # The value itself stays the bare text: a rubric only expands where it becomes
     # wire text, so a member's value reads exactly as it was written.
     assert str(rubric) == bare
+    # And it survives the three ways a value gets duplicated. `__new__` takes four
+    # arguments where `str` hands back one, so each of these raised a `TypeError`
+    # until the rubric said how to rebuild itself.
+    for clone in (copy.copy(rubric), copy.deepcopy(rubric), pickle.loads(pickle.dumps(rubric))):  # noqa: S301 -- the payload is this test's own value
+        assert render(clone) == expected
 
 
 @given(st.text())

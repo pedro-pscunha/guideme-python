@@ -1,3 +1,4 @@
+import copy
 from collections.abc import Callable
 from typing import cast
 
@@ -186,6 +187,19 @@ def test_choice_exposes_rubric_keys_and_fallback_and_refuses_a_bad_definition() 
     assert Department.sales.value == "Pricing, upgrades, new accounts"
     assert Department.from_key("technical") is Department.technical
     assert Department.from_key("marketing") is None
+
+    # A rubric survives being copied, parts and fallback marking alike. `copy.deepcopy`
+    # of a dict of options is what a caller builds before `choose_among`, and a bare
+    # string copied fine before this feature existed.
+    class Copied(Choice):
+        billing = copy.deepcopy(option("Payments", examples=["My card was charged twice"]))
+        sales = copy.deepcopy(fallback("Pricing"))
+
+    assert Copied.rubric() == (
+        ("billing", "Payments\nExamples: My card was charged twice"),
+        ("sales", "Pricing"),
+    )
+    assert Copied.fallback_member() is Copied.sales
 
 
 def test_levels_are_totally_ordered_by_declaration() -> None:
