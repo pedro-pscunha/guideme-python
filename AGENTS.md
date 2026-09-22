@@ -187,7 +187,9 @@ it asserts the absence of a failure on a path where every other test asserts a p
 existing test could carry it. Rubric examples added the last four, also user-requested scope:
 the golden rendering table, the passthrough property that proves 0.1.0's bytes have not moved,
 the wire proof that a rendered rubric reaches the request, and a live proof that examples move
-the distribution. Each asserts a different thing about a string no existing test looks at.
+the distribution — one function covering a choice and a noul, because both are the same
+invariant and a second function would buy nothing. Each asserts a different thing about a
+string no existing test looks at.
 Everything else those two passes added went into a parameter of a test that was already there.
 A new test must be one of:
 

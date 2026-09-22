@@ -134,6 +134,18 @@ DESCRIBED = {
 """The same two rubrics, with the examples that tell the two apart."""
 
 
+WORKAROUND = (
+    "Our nightly export job has been failing since Tuesday. We pull the numbers by hand for now."
+)
+"""A ticket a vague `Urgent` / `Not urgent` calls urgent, and the examples call otherwise."""
+
+URGENT = "Urgent"
+NOT_URGENT = "Not urgent"
+
+URGENT_EXAMPLES = ["customers cannot log in", "money is moving to the wrong place"]
+NOT_URGENT_EXAMPLES = ["a broken job with a manual workaround", "a cosmetic bug"]
+
+
 def _return_status(guide: Guide, options: dict[str, str]) -> float:
     ranked = guide.ask(
         choose_among("What is the customer asking about?", options).detail(), AMBIGUOUS
@@ -141,17 +153,32 @@ def _return_status(guide: Guide, options: dict[str, str]) -> float:
     return dict(ranked.probabilities)[Key("return_status")]
 
 
-def test_examples_move_the_distribution_towards_the_option_they_describe() -> None:
+def _urgent(guide: Guide, yes: str, no: str) -> float:
+    verdict = guide.ask(noul("Is this ticket urgent?").criteria(yes, no).detail(), WORKAROUND)
+    return verdict.p
+
+
+def test_examples_move_the_distribution_towards_the_alternative_they_describe() -> None:
     """The invariant the feature exists for, not a number the model is not stable to.
 
-    The rubric text is the same in both asks, so the examples are the only thing that
-    changed. Measured on 2026-09-21 against `jev-1.13.0`: 0.50 bare, 0.88 described,
-    over three runs each.
+    Both halves hold the rubric text constant across their two asks, so the examples
+    are the only thing that changed. Measured on 2026-09-21 against `jev-1.13.0`: a
+    choice over two vague options goes 0.50 bare to 0.88 described, and a noul over
+    vague criteria goes 0.75 plain to 0.17 described, three and four runs each. The
+    noul half is the one where the plain rubric is outright wrong: one of the
+    not-urgent examples is what this ticket describes.
     """
     guide = Guide.from_env()
     try:
         bare = _return_status(guide, BARE)
         described = _return_status(guide, DESCRIBED)
+        plain = _urgent(guide, URGENT, NOT_URGENT)
+        told = _urgent(
+            guide,
+            option(URGENT, examples=URGENT_EXAMPLES, counterexamples=NOT_URGENT_EXAMPLES),
+            option(NOT_URGENT, examples=NOT_URGENT_EXAMPLES, counterexamples=URGENT_EXAMPLES),
+        )
     finally:
         guide.close()
     assert described > bare
+    assert told < plain
