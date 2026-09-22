@@ -40,7 +40,9 @@ The two labels are literal and exact: `"Examples: "` and `"Not this option: "`, 
 trailing space. They are not formatting to be chosen locally — `Not this option` was measured
 against `Not` and `Counterexamples` on the same confusable case and reached the correct option
 with the highest mean probability of the three, so a different label is a different, and worse,
-contract. The examples clause always precedes the counterexamples clause.
+contract. The renderer appends the examples clause before the counterexamples clause — a
+statement about the renderer, not about every string that reaches the wire, since a caller
+who writes the labels into `what` by hand can put them in any order they like.
 
 `what` is used verbatim: never trimmed, never re-punctuated. Newline separation is what makes
 that safe, since examples often end in `?` and a space-joined format would need a trailing `.`
@@ -55,6 +57,13 @@ differently would send different bytes for the same declaration.
 text; `examples` and `counterexamples`, the two clauses in declaration order; and `rendered`,
 the exact bytes the algorithm above must produce. The `noul` cases come from the runtime
 renderer rather than a derive, so they are the vector's only cover for that path.
+
+An absent clause appears as `[]`, not as `null` and not by omitting the key. A consumer must
+read that as *no clause was declared* and rebuild the case without the argument, because an
+empty clause written out is itself a refused declaration and so can never be a vector case.
+`kind` is what picks the constructor to rebuild with: a `levels` case has to go through the
+level constructor and a `choice` or `noul` case through the option one, which is how the vector
+exercises the surface a caller writes rather than the renderer alone.
 
 Items are inserted **verbatim**. Nothing is escaped, and the rendering is not required to be
 reversible — no SDK parses a rendered rubric back into its parts, and none should be written
@@ -118,7 +127,9 @@ ask time.
   implementer reaching for the idiomatic call in either language writes a rule the other does
   not have, and neither version looks wrong read on its own. `U+2028`, `U+2029` and `U+0085`
   are deliberately **not** refused: they are `White_Space`, so an item made only of them is
-  already refused as empty, and embedded they cannot produce a clause boundary.
+  already refused as empty, and embedded they cannot produce a clause boundary in the bytes an
+  SDK emits. What a model's tokenizer makes of them is unmeasured and stays out of the
+  contract, the same way the broader line-break set does.
 
 ### What counts as blank, and what counts as a duplicate
 
