@@ -4,6 +4,25 @@
 
 Nothing yet.
 
+## 0.1.1 — 2026-09-21
+
+Additive. Nothing that worked in 0.1.0 sends different bytes.
+
+- `option(rubric, examples=…, counterexamples=…)` and `level(rubric, examples=…)` join
+  `fallback(…)`, which now takes the same keywords. All three are exported from `guideme`,
+  bringing `__all__` to 35 names. A rubric written as a bare string keeps working everywhere.
+- The parts are composed into the rubric where it becomes wire text: clauses joined with a
+  newline, items within one joined with `"; "`, the text verbatim. A rubric with no examples
+  renders to its own text, byte for byte, so an existing request is unchanged. The rendered
+  string is a cross-SDK contract item, stated in `docs/contract.md` and pinned by
+  `spec/vectors/rubric.json`.
+- Every site that puts a rubric on the wire renders — `Choice.rubric()`, `Levels.levels()`,
+  `choose_among` and `score_levels` — so examples cannot be silently dropped by reaching a
+  runtime constructor.
+- `level(…)` takes no counterexamples: "not this option" means nothing on an ordered scale. An
+  `option(…)` carrying counterexamples written where a level belongs is a `ConfigError`, as is
+  a blank rubric, a blank or repeated example, and an `examples=[]` written out.
+
 ## 0.1.0 — 2026-09-21
 
 First release. Everything below is new, so this entry lists the surface rather than the

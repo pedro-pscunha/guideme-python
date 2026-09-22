@@ -328,7 +328,9 @@ a different backend.
 
 Captured from `otel/opentelemetry-collector-contrib` with the debug exporter and the
 `collector.yaml` above, running `examples/otlp` under `events("log")` against the live API.
-Timestamps, `Flags` and the resource block are trimmed throughout. The first two blocks are
+Timestamps, `Flags`, the version on each `InstrumentationScope` line and the resource block are
+trimmed throughout — the version because a capture is taken once and every release would
+otherwise leave a number here that a reader cannot tell from a real one. The first two blocks are
 otherwise complete; the later ones are excerpts, cut to the lines each is making a point about,
 so a missing `Parent ID`, `Kind`, scope line or attribute there means it was cut, not that it
 was absent. Nothing is reworded, and no value is invented.
@@ -336,7 +338,7 @@ was absent. Nothing is reworded, and no value is invented.
 The three-question batch is one ask span with one attempt under it:
 
 ```
-InstrumentationScope guideme 0.1.0
+InstrumentationScope guideme
 Span #1
     Trace ID       : 164107043647c42bc827fff022ec4308
     Parent ID      :
@@ -356,7 +358,7 @@ Attributes:
      -> gen_ai.usage.input_tokens: Int(422)
      -> gen_ai.usage.output_tokens: Int(71)
 
-InstrumentationScope guideme.api 0.1.0
+InstrumentationScope guideme.api
 Span #1
     Trace ID       : 164107043647c42bc827fff022ec4308
     Parent ID      : 53c4b9ada6417408
@@ -376,7 +378,7 @@ Attributes:
 Its three answers arrive on the logs pipeline, each carrying the ask span's ids:
 
 ```
-InstrumentationScope guideme 0.1.0
+InstrumentationScope guideme
 LogRecord #1
 SeverityText: INFO
 SeverityNumber: Info(9)
@@ -441,7 +443,7 @@ throttled attempt's rather than the ask's. The live API does not throttle on dem
 block is from a local server that answers `429` once:
 
 ```
-InstrumentationScope guideme.api 0.1.0
+InstrumentationScope guideme.api
 LogRecord #0
 SeverityText: WARN
 SeverityNumber: Warn(13)
