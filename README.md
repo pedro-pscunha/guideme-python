@@ -19,8 +19,8 @@ uv add guideme        # or: pip install guideme
 
 guideme needs Python 3.12 or newer. The package ships `py.typed`, so your type checker sees
 every annotation. Get an API key on the [keys page](https://console.typesafe.ai/keys) of the
-TypeSafe console, and set it in the environment as `TYPESAFE_API_KEY`. To give the key in code,
-use `Guide.builder().api_key(ApiKey("…")).build()`.
+TypeSafe console. Set it in the environment as `TYPESAFE_API_KEY`. To give the key in code, use
+`Guide.builder().api_key(ApiKey("…")).build()`.
 
 ## Quick start
 
@@ -61,30 +61,40 @@ if guide.ask(score(Frustration, "How frustrated is the customer?"), ticket) >= (
     prioritise()
 ```
 
+- `ticket` is the *state*: the data that you send with the question, here a support ticket.
+  `escalate()` and the `route_…()` functions are your own code.
+- `noul(…)` asks a yes/no question (TypeSafe calls it a *noul*). `choose(…)` asks a choice, and
+  `score(…)` asks a score.
 - `Guide.from_env()` reads the key from `TYPESAFE_API_KEY`.
 - The value of a member is its *rubric*: the text that tells the model what the option or level
   means. The name of the member is its key on the wire. A docstring on a member is not rubric.
+- Declare the levels from low to high. The first member is the lowest level, and `>=` compares
+  by this order.
 - pyright in strict mode makes sure that the `match` handles every option. If you add a
   department, the `match` is an error until you handle it.
-- `sales` is the fallback: the answer when the choice is unsure. The default `min_confidence`
-  is `0.0`, and with it a choice is never unsure. That is why this choice sets `0.6`.
+- `sales` is the fallback: the answer when the choice is *unsure*, that is, when its confidence
+  is less than `min_confidence`. The default `min_confidence` is `0.0`, so a choice is never
+  unsure and `sales` is never used as the fallback. That is why this choice sets `0.6`.
 
-The gate type-checks this example as `tests/typing/readme.py`, so this page cannot drift from
-what the package infers. Build one guide and share it: the Configuration section tells why.
+Build one guide and share it: the Configuration section tells why.
 
 ## Questions
 
-There are three kinds of question. A *yes/no question* (TypeSafe calls it a *noul*, and the
-wire type is `noul`) gives a `bool`. A *choice* gives one of your options. A *score* gives one
-level of your ordered scale.
+There are three kinds of question. A yes/no question gives a `bool`. A choice gives one of your
+options. A score gives one level of your ordered scale. Each constructor below gives the plain
+answer. Add `.detail()` to a question to get the full reading in its place: the probabilities,
+the confidence and the `unsure` flag.
 
 | Constructor | Asks | Plain answer | `.detail()` answer |
 |---|---|---|---|
 | `noul("…")` | a yes/no question | `bool` | `Verdict`: `verdict` (`"yes"`, `"no"`, `"unsure"`), `p` |
 | `choose(C, "…")`, `C` a `Choice` | a choice over 1 to 255 options | a member of `C` | `Ranked[C]`: `choice`, `confidence`, `unsure`, `probabilities` |
-| `score(L, "…")`, `L` a `Levels` | a score over 2 to 10 levels, low to high | the most probable member of `L` | `Scored[L]`: the expected `value`, `level`, `confidence`, `unsure`, `distribution` |
+| `score(L, "…")`, `L` a `Levels` | a score over 2 to 10 levels, low to high | the most probable member of `L` | `Scored[L]`: `value`, `level`, `confidence`, `unsure`, `distribution` |
 | `choose_among("…", options)` | a choice over 1 to 255 `{key: rubric}` pairs given at runtime | `Key`, the key | `Ranked[Key]` |
 | `score_levels("…", levels)` | a score over 2 to 10 level texts given at runtime | `Rank`, the index from 0 | `Scored[Rank]` |
+
+The `value` of a score is the probability-weighted level number. The lowest level is 0, and the
+value can land between two levels.
 
 ```python
 team = guide.ask(choose_among("Which team?", {"billing": "Payments", "technical": "Bugs"}), ticket)
@@ -96,23 +106,14 @@ The size limits come from the TypeSafe API. A `Choice` or `Levels` class out of 
 Two members of one class cannot have the same rubric: Python makes the second an alias of the
 first, so that is a `ConfigError` too.
 
-A yes/no question can say what yes and no mean with
-`.criteria("what yes means", "what no means")`. The instructions can be a string or any
-JSON-shaped value, so a question can name fields of structured state.
+The question text (the `instructions` argument) can be a string or any JSON-shaped value, so it
+can name fields of structured state. A yes/no question can also say what yes and no mean with
+`.criteria("what yes means", "what no means")`.
 
-The *state* is the data you send with the question: a ticket, a message, a record. It can be
-anything JSON-shaped: a string, a number, a `dict`, a list, and nestings of them. Convert a
-dataclass with `dataclasses.asdict` and a pydantic model with `.model_dump()`. A value that
-`json` cannot write, such as `NaN` or `bytes`, raises `ConfigError` before anything is sent.
-
-`Question` is what the five constructors return. To annotate a question that you store or pass
-on, use the concrete types `NoulQuestion`, `ChoiceQuestion`, `ScoreQuestion`, `DetailedNoul`,
-`DetailedChoice` and `DetailedScore`. A `dict` is invariant, so a `dict[str, NoulQuestion]` is
-not a `dict[str, Question[bool]]`.
-
-`Probability`, `Confidence`, `Key` and `Rank` are `NewType` brands. Only the wire creates them,
-after it validates the value. `Probability(2.0)` in your code is not refused. `Model` names a
-model. `ApiKey` holds the key and never prints it.
+The state can be anything JSON-shaped: a string, a number, a `dict`, a list, and nestings of
+them. Convert a dataclass with `dataclasses.asdict` and a pydantic model with `.model_dump()`.
+A value that `json` cannot write, such as `NaN` or `bytes`, raises `ConfigError` before anything
+is sent.
 
 `guide.models()` returns a `tuple[ModelInfo, ...]`: the models that your account can use, each
 with `name`, `description` and `release_date`. It is one `GET /v1/models` call, with no ask
@@ -127,13 +128,14 @@ An answer is *unsure* when it is not certain enough under the thresholds:
 - Choice and score: `confidence < min_confidence` is unsure. With the default `0.0`, no answer
   is unsure.
 
-A `Policy` is a set of thresholds, and each field is optional. You set it on the question
-(`.yes_above(p)`, `.no_below(p)`, `.min_confidence(c)`, `.with_policy(Policy(…))`), on the guide
-(`Guide.builder().policy(…)`, or `guide.with_policy(…)` for a copy), or not at all. The question
-wins over the guide, and the guide wins over the defaults. A `Policy` settled against the
-defaults is a `Thresholds`, the input of `guideme.policy.resolve` and of every golden vector.
+A `Policy` is a set of thresholds, and each field is optional. You can set it at two layers:
 
-When an answer is unsure, guideme goes down the *unsure ladder*:
+- On a question: `.yes_above(p)` and `.no_below(p)` on a yes/no question, `.min_confidence(c)`
+  on a choice or a score, and `.with_policy(Policy(…))` on any question.
+- On a guide: `Guide.builder().policy(…)`, or `guide.with_policy(…)` for a copy.
+
+The question wins over the guide, and the guide wins over the defaults. When an answer is unsure,
+guideme goes down the *unsure ladder*:
 
 1. The `.otherwise(value)` of the question.
 2. The `fallback(…)` member of the `Choice`. A `Levels` class has no fallback member, so for a
@@ -141,8 +143,9 @@ When an answer is unsure, guideme goes down the *unsure ladder*:
 3. `UnsureError`, which names the question and the threshold that it missed.
 
 `.detail()` skips the ladder and drops any `.otherwise(…)`. It never raises `UnsureError` and
-gives you the full reading to decide yourself. `Policy` is a frozen dataclass, so a house policy
-can be a module constant:
+gives you the full reading to decide yourself.
+
+`Policy` is a frozen dataclass, so you can keep one in a module constant:
 
 ```python
 CAUTIOUS = Policy(yes_above=0.7, no_below=0.3)
@@ -202,12 +205,12 @@ Examples: My card was charged twice; Where is my refund?
 Not this option: The dashboard is down
 ```
 
-A rubric with no examples sends the same bytes as before. Examples render in the order that you
-write them, and this text is part of the published contract. The same values work at runtime,
-in `choose_among("…", {"billing": option(…)})` and `score_levels("…", [level(…), …])`.
+A rubric with no examples sends only its text. Examples render in the order that you write them,
+and this text is part of the published contract. The same values work at runtime, in
+`choose_among("…", {"billing": option(…)})` and `score_levels("…", [level(…), …])`.
 
-A yes and a no are two options of one question, and a vague pair is the easiest to get wrong. So
-`.criteria(…)` also takes an `option(…)` for each side:
+`.criteria(…)` takes an `option(…)` for the yes and one for the no. A vague yes/no pair is easy
+to get wrong, and examples help most there:
 
 ```python
 urgent = noul("Is this ticket urgent?").criteria(
@@ -219,25 +222,24 @@ urgent = noul("Is this ticket urgent?").criteria(
 [`docs/design.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/design.md#decisions)
 records a measured case where these examples change a wrong yes into a correct no.
 
-Each of these raises `ConfigError` where you write the rubric:
+A rubric obeys these rules. A rubric that breaks one raises `ConfigError` where you write it:
 
-- An empty clause, such as `examples=[]`. To say there are none, leave the clause out.
-- A clause given as one string, such as `examples="refund"`, in place of a list.
-- A blank entry, the same entry twice in one clause, or a newline or carriage return in an entry.
-- One string as an example of two options (or of the yes and the no, or of two levels).
-- One string as an example and a counterexample of the same option.
-- A counterexample on a level, or a `fallback(…)` in `choose_among`, `score_levels` or
-  `.criteria(…)`.
-- Examples on a blank rubric.
-
-Some overlaps are legal. One string can be an example of one option and a counterexample of
-another: that is how you tell two similar options apart. An entry can contain `"; "`, and the
-rubric text itself can contain newlines. A blank rubric with no examples is legal too.
+- Leave a clause out to say there are none. An empty clause, such as `examples=[]`, is refused.
+- Give a clause as a list, not as one string such as `examples="refund"`.
+- An entry is not blank, is on one line (no newline or carriage return), and appears once in its
+  clause. An entry can contain `"; "`.
+- One string cannot be an example of two options (or of the yes and the no, or of two levels).
+- One string cannot be an example and a counterexample of the same option. It can be an example
+  of one option and a counterexample of another: that is how you tell two similar options apart.
+- A level has no counterexamples, and `choose_among`, `score_levels` and `.criteria(…)` take no
+  `fallback(…)`.
+- Examples or counterexamples on a blank rubric are refused. A blank rubric alone is legal, and
+  the rubric text itself can contain newlines.
 
 ## Several questions in one request
 
-A tuple of questions is also a question. So is a list or a dict, and they nest. The answer has
-the same shape and comes from one request and one span. Each question keeps its own policy.
+`ask` also takes a tuple, a list or a dict of questions, and they nest. The answer has the same
+shape and comes from one request and one span. Each question keeps its own policy.
 
 ```python
 urgent, dept, mood, flags = guide.ask(
@@ -261,8 +263,8 @@ whole call fails. So put `.otherwise(…)` or `.detail()` on each question that 
 unsure.
 
 Any nesting works at runtime. Your type checker infers a type for one question, a list and a
-dict. It also infers a tuple of up to eight questions, or of up to seven followed by one
-list or dict (the shape above).
+dict. It also infers a tuple of up to eight questions, or of up to seven followed by one list or
+dict (the shape above).
 
 ## The receipt
 
@@ -293,11 +295,11 @@ guideme SDK, and the value of `error.type` on the failed span.
 | `InvalidError` | `invalid` | HTTP 422. `.detail` is the response body. |
 | `RateLimitedError` | `rate_limited` | HTTP 429 after the retries, or a `retry-after` that is too long to wait. `.retry_after` holds it. |
 | `OverloadedError` | `overloaded` | HTTP 529, on the same terms. `.retry_after` holds it. |
-| `TransportError` | `transport` | A connection, TLS or timeout failure. |
+| `TransportError` | `transport` | A connection, TLS or timeout failure, or a disconnect during the response. |
 | `UnexpectedStatusError` | `unexpected_status` | A status that the contract does not define. |
 | `ProtocolError` | `protocol` | The response breaks the contract: a body that does not decode, a wrong answer kind, an option or level that is not in the rubric, a probability outside 0..1. |
 | `UnsureError` | `unsure` | The policy said unsure and the ladder had no value. |
-| `ConfigError` | `config` | A mistake in your code, raised where you write it: bad thresholds, no key, an empty batch, state that is not JSON, a rubric that breaks a rule, a bad `events(…)`, a timeout that is not positive, negative retries or backoff, a `base_url` that holds credentials. |
+| `ConfigError` | `config` | A mistake in your code, raised before anything is sent. For example: bad thresholds, no key, an empty batch, state or instructions that `json` cannot write, a rubric that breaks a rule, two fallback members in one `Choice`, a bad `events(…)`, a timeout that is not positive, negative retries or backoff, a malformed `base_url` or one that holds credentials, a timeout next to a transport, a transport given to the wrong build, `with_policy(…)` on a closed guide. |
 
 ## Retries and timeouts
 
@@ -310,17 +312,17 @@ handshake that did not complete. That request did not reach a server, so nothing
 A call makes at most `max_retries + 1` attempts, whatever the mix of failures.
 
 A disconnect during the response is not resent: the API can have answered, and a second request
-pays for the same answer twice. No timeout is resent, of any phase, a connect timeout included.
-Each of these raises `TransportError` at once.
+pays for the same answer twice. guideme does not resend a timeout, in any phase. This includes a
+connect timeout. Each of these raises `TransportError` at once.
 [`docs/design.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/design.md#decisions)
 gives the reasons.
 
 **`timeout` is not a deadline for the attempt.** `httpx` gives the full value to each phase:
 connect, write, read, and the wait for a pooled connection. Thus one slow attempt can take more
 than the timeout. The worst case for a call is `max_retries + 1` attempts of several phases each,
-plus the backoff between them. The Rust SDK has one deadline for the full attempt, and
+plus the backoff between them. The Rust SDK differs here, as
 [`docs/contract.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/contract.md)
-records this divergence.
+records.
 
 ## Testing your code
 
@@ -350,9 +352,8 @@ def test_an_urgent_ticket_is_prioritised() -> None:
 ```
 
 `q0` is the first question in encounter order, and a batch of three uses `q0`, `q1` and `q2`.
-To test a failure, raise an exception in the handler. guideme resends an `httpx.ConnectError`
-inside the retry budget. It does not resend an `httpx.ReadTimeout`, an `httpx.ConnectTimeout` or
-an `httpx.RemoteProtocolError`. For `AsyncGuide`, give the same `httpx.MockTransport` to
+To test a failure, raise an `httpx` exception in the handler. The Retries and timeouts section
+says which ones guideme resends. For `AsyncGuide`, give the same `httpx.MockTransport` to
 `async_transport(…)` and call `build_async()`. A `MockTransport` is both kinds of transport.
 
 ## Observability
@@ -373,12 +374,12 @@ provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
 trace.set_tracer_provider(provider)
 ```
 
-Each request is one `guideme.ask` span with the OpenTelemetry GenAI fields, and one HTTP client
+Each `ask` is one `guideme.ask` span with the OpenTelemetry GenAI fields, and one HTTP client
 span per attempt below it. A retry adds a `guideme.retry` event. Each question adds a
 `guideme.answer` event with the outcome, the probability or confidence and the thresholds. Each
 answer is also an OTLP log record at `INFO`, and each retry one at `WARN`, with the trace id and
 span id. To receive them, install a `LoggerProvider`. The state is not recorded unless you set
-`record_state(True)`. The API key is never recorded.
+`record_state(True)`, and the API key is never recorded.
 
 `events(…)` selects the signal for answers and retries: `"span"`, `"log"` or `"both"` (the
 default). If you export traces and logs to one backend, set `"span"` or `"log"` to store each
@@ -396,7 +397,7 @@ it all against the live API, with a collector that prints what arrives.
 | Setting | Default | What it does |
 |---|---|---|
 | `api_key(ApiKey(…))` | none, required | The API key. |
-| `base_url(…)` | `https://api.typesafe.ai` | The API origin. It cannot hold credentials. |
+| `base_url(…)` | `https://api.typesafe.ai` | The API origin. It cannot hold credentials. Give the final https origin. guideme follows redirects. |
 | `model(Model(…))` | `jev-latest` | The model or alias to ask. |
 | `policy(Policy(…))` | the defaults | The policy of the guide. The policy of a question wins over it. |
 | `max_retries(n)` | `3` | Resends per call. `0` never resends. |
@@ -419,7 +420,8 @@ is for `build_async()`. The wrong pair is a `ConfigError` too.
 
 Build one guide per process and share it. A guide holds a connection pool, and it is safe to use
 from many threads or tasks at once. A guide per request also works, but it opens a pool for each
-request.
+request. `guide.with_policy(…)` returns a second guide over the same pool. The pool counts its
+guides: after you close one, the other can still ask, and the pool closes with the last guide.
 
 ## Sync and async
 
@@ -434,13 +436,21 @@ async with AsyncGuide.from_env() as guide:
 For the synchronous version, use `Guide`, `with`, and no `await`. `Guide.builder()` and
 `AsyncGuide.builder()` return the same `GuideBuilder`: `.build()` gives a `Guide`, and
 `.build_async()` gives an `AsyncGuide`. A guide closes at the end of its `with` block. Outside a
-block, call `guide.close()`. `guide.with_policy(…)` returns a second guide over the same pool.
-The pool counts its guides: after you close one, the other can still ask, and the pool closes
-with the last guide. If you close one guide twice, the second close does nothing.
+block, call `guide.close()`. If you close one guide twice, the second close does nothing. Do not
+ask through a closed guide.
 
 ## Lower layers
 
-The `guideme` package re-exports everything above, and `guideme.__all__` is that list.
+The `guideme` package re-exports everything above, and `guideme.__all__` is that list. Some of
+those names need a note:
+
+- `Question` is what the five constructors return. To annotate a question that you store or
+  pass on, use the concrete types `NoulQuestion`, `ChoiceQuestion`, `ScoreQuestion`,
+  `DetailedNoul`, `DetailedChoice` and `DetailedScore`. A `dict` is invariant, so a
+  `dict[str, NoulQuestion]` is not a `dict[str, Question[bool]]`.
+- `Probability`, `Confidence`, `Key` and `Rank` are `NewType` brands. Only the wire creates
+  them, after it validates the value, so `Probability(2.0)` in your code is not refused.
+- `Model` names a model. `ApiKey` holds the key and never prints it.
 
 Three modules are a second supported tier: `guideme.api`, `guideme.api.client` and
 `guideme.policy`. Import them by their own path. The top level does not re-export them. They
@@ -452,21 +462,22 @@ name looks like.
   `guideme.api.__all__` lists the request and response models, its own `Usage`, and four
   adapters between them and the core.
 - `guideme.api.client` holds `Client` and `AsyncClient`, to build requests yourself.
-- `guideme.policy.resolve(answer, thresholds)` is the pure decision function. `spec/` holds its
-  JSON Schemas and 42 golden vectors.
+- `guideme.policy.resolve(answer, thresholds)` is the pure decision function. It takes a
+  `Thresholds`: a `Policy` settled against the defaults. `spec/` holds its JSON Schemas and 42
+  golden vectors, which use the same `Thresholds`.
 
-`guideme.api` declares its own `Question`, `NoulQuestion`, `ChoiceQuestion`, `ScoreQuestion` and
-`Usage`. These wire shapes are different classes from the ones above, and the import line tells
-you which one you have.
+`guideme.api` also declares a `Question`, `NoulQuestion`, `ChoiceQuestion`, `ScoreQuestion` and
+`Usage` of its own: wire shapes, different classes from the ones above. You meet them only when
+you build requests by hand, and
 [`docs/design.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/design.md#sharp-edges)
-explains these pairs and the other sharp edges.
+explains these pairs.
 
 ## Other SDKs
 
-Each guideme SDK is written from scratch in its own language, and they all answer the same way.
-They satisfy one contract: the wire schemas, the 42 golden policy vectors and the interface
-shape. [guideme-rust](https://github.com/pedro-pscunha/guideme-rust) publishes it under `spec/`
-and states it in
+Each guideme SDK is written from scratch in its own language, and they all turn one reading into
+the same answer. They satisfy one contract: the wire schemas, the 42 golden policy vectors and
+the interface shape. [guideme-rust](https://github.com/pedro-pscunha/guideme-rust) publishes it
+under `spec/` and states it in
 [`docs/contract.md`](https://github.com/pedro-pscunha/guideme-rust/blob/main/docs/contract.md).
 
 | Language | Package | Repository |
@@ -475,9 +486,7 @@ and states it in
 | Python | `guideme` | this repository |
 | TypeScript | `@guideme/sdk` (not yet on npm) | [guideme-typescript](https://github.com/pedro-pscunha/guideme-typescript) |
 
-This repository copies `spec/` and records the source commit in `spec/SOURCE`. A CI job fails
-when the copy drifts from the `main` branch of guideme-rust. The span, event and attribute names
-are shared too, so one dashboard reads every SDK.
+The span, event and attribute names are shared too, so one dashboard reads every SDK.
 
 ## Development
 
