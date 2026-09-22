@@ -7,11 +7,14 @@ from guideme import (
     AsyncGuide,
     Choice,
     Guide,
+    Key,
     Levels,
     Scored,
     choose,
+    choose_among,
     fallback,
     noul,
+    option,
     score,
 )
 from guideme.question import Question
@@ -110,3 +113,77 @@ def test_the_documented_batch_is_typed_end_to_end_through_async_guide(spans: Rec
     urgent, dept, mood, flags = asyncio.run(run())
     check(urgent, dept, mood, flags)
     assert billed(spans) > 0
+
+
+AMBIGUOUS = "About those shoes - what is the situation with the money side of things?"
+"""A ticket two options both half fit, where the examples are what tells them apart."""
+
+POLICY = "The shop's rules"
+STATUS = "One customer's open case"
+
+POLICY_EXAMPLES = ["How many days do I have to send it back?", "Can I return a sale item?"]
+STATUS_EXAMPLES = ["Where is my refund?", "I posted the shoes back last week and heard nothing"]
+
+BARE = {"return_policy": POLICY, "return_status": STATUS}
+"""The rubrics as bare strings. Deliberately vague: the ticket is near a coin flip."""
+
+DESCRIBED = {
+    "return_policy": option(POLICY, examples=POLICY_EXAMPLES, counterexamples=[STATUS_EXAMPLES[1]]),
+    "return_status": option(STATUS, examples=STATUS_EXAMPLES, counterexamples=[POLICY_EXAMPLES[1]]),
+}
+"""The same two rubrics, with the examples that tell the two apart."""
+
+
+WORKAROUND = (
+    "Our nightly export job has been failing since Tuesday. We pull the numbers by hand for now."
+)
+"""A ticket a vague `Urgent` / `Not urgent` calls urgent, and the examples call otherwise."""
+
+URGENT = "Urgent"
+NOT_URGENT = "Not urgent"
+
+URGENT_EXAMPLES = ["customers cannot log in", "money is moving to the wrong place"]
+NOT_URGENT_EXAMPLES = ["a broken job with a manual workaround", "a cosmetic bug"]
+
+
+def _return_status(guide: Guide, options: dict[str, str]) -> float:
+    ranked = guide.ask(
+        choose_among("What is the customer asking about?", options).detail(), AMBIGUOUS
+    )
+    return dict(ranked.probabilities)[Key("return_status")]
+
+
+def _urgent(guide: Guide, yes: str, no: str) -> float:
+    verdict = guide.ask(noul("Is this ticket urgent?").criteria(yes, no).detail(), WORKAROUND)
+    return verdict.p
+
+
+def test_examples_move_the_distribution_towards_the_alternative_they_describe() -> None:
+    """The invariant the feature exists for, not a number the model is not stable to.
+
+    Both halves hold the rubric text constant across their two asks, so the examples
+    are the only thing that changed. Measured on 2026-09-21 against `jev-1.13.0`.
+    The choice half, three runs: 0.50 / 0.49 / 0.53 bare, 0.87 / 0.89 / 0.89 described.
+    The noul half, four runs: 0.75 / 0.75 / 0.74 / 0.76 plain, 0.17 every time with
+    examples. The noul half is the one where the plain rubric is outright wrong: one
+    of the not-urgent examples is what this ticket describes.
+
+    The cross-SDK design measured the same noul case at 0.25 rather than 0.17. The
+    difference is that this ask gives each side counterexamples as well as examples,
+    which the design's probe did not; it is a stronger rubric, not a disagreement
+    between the two SDKs.
+    """
+    guide = Guide.from_env()
+    try:
+        bare = _return_status(guide, BARE)
+        described = _return_status(guide, DESCRIBED)
+        plain = _urgent(guide, URGENT, NOT_URGENT)
+        told = _urgent(
+            guide,
+            option(URGENT, examples=URGENT_EXAMPLES, counterexamples=NOT_URGENT_EXAMPLES),
+            option(NOT_URGENT, examples=NOT_URGENT_EXAMPLES, counterexamples=URGENT_EXAMPLES),
+        )
+    finally:
+        guide.close()
+    assert described > bare
+    assert told < plain

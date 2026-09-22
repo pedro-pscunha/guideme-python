@@ -1,3 +1,4 @@
+import copy
 from collections.abc import Callable
 from typing import cast
 
@@ -6,7 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from guideme import ConfigError
-from guideme.enums import Choice, Levels, fallback
+from guideme.enums import Choice, Levels, fallback, level, option
 
 
 def _compare(low: Levels, high: Levels) -> bool:
@@ -71,6 +72,105 @@ def _one_level() -> type[Levels]:
     return OneLevel
 
 
+def _examples_attached_to_a_blank_rubric() -> type[Choice]:
+    # The blank rubric alone is legal and means what it always meant. Attaching
+    # examples to it is the mistake: they describe something that is not there.
+    class Blank(Choice):
+        a = option("   ", examples=["My card was charged twice"])
+
+    return Blank
+
+
+def _an_examples_clause_written_empty() -> type[Choice]:
+    class Empty(Choice):
+        a = option("Payments", examples=[])
+
+    return Empty
+
+
+def _examples_given_as_one_string() -> type[Choice]:
+    # A `str` is a `Sequence[str]`, so the checker allows it and the clause would be
+    # the six letters of "refund".
+    class Shredded(Choice):
+        a = option("Payments", examples="refund")
+
+    return Shredded
+
+
+def _an_empty_tuple_written_out() -> type[Choice]:
+    # `None` is how a clause is left out, so an empty sequence is always a clause
+    # written on purpose that says nothing -- whatever type the caller reached for.
+    class Empty(Choice):
+        a = option("Payments", counterexamples=())
+
+    return Empty
+
+
+def _a_blank_example() -> type[Choice]:
+    class Blank(Choice):
+        a = option("Payments", examples=["My card was charged twice", " "])
+
+    return Blank
+
+
+def _a_newline_in_an_example() -> type[Choice]:
+    # Items are joined onto one line, so a newline in one reads as a clause the rubric
+    # never declared -- here, a counterexample clause that was never written.
+    class Forged(Choice):
+        a = option("Payments", examples=["x\nNot this option: anything at all"])
+
+    return Forged
+
+
+def _a_carriage_return_in_a_counterexample() -> type[Choice]:
+    class Stray(Choice):
+        a = option("Payments", counterexamples=["the dashboard is down\r"])
+
+    return Stray
+
+
+def _a_repeated_example() -> type[Choice]:
+    class Repeated(Choice):
+        a = option("Payments", examples=["Where is my refund?", "Where is my refund?"])
+
+    return Repeated
+
+
+def _one_example_of_two_options() -> type[Choice]:
+    class Shared(Choice):
+        billing = option("Payments", examples=["Where is my refund?"])
+        technical = option("Bugs", examples=["Where is my refund?"])
+
+    return Shared
+
+
+def _one_example_of_two_levels() -> type[Levels]:
+    class Shared(Levels):
+        cosmetic = level("No impact", examples=["a typo in a label"])
+        blocking = level("No workaround exists", examples=["a typo in a label"])
+
+    return Shared
+
+
+def _an_example_that_is_also_a_counterexample() -> type[Choice]:
+    class Both(Choice):
+        billing = option(
+            "Payments",
+            examples=["Where is my refund?"],
+            counterexamples=["Where is my refund?"],
+        )
+
+    return Both
+
+
+def _a_counterexample_on_a_level() -> type[Levels]:
+    class Marked(Levels):
+        cosmetic = option("No impact", counterexamples=["cannot log in"])
+        blocking = level("No workaround exists")
+
+    return Marked
+
+
 def _eleven_levels() -> type[Levels]:
     class ElevenLevels(Levels):
         l0 = "a"
@@ -104,6 +204,19 @@ def test_choice_exposes_rubric_keys_and_fallback_and_refuses_a_bad_definition() 
     assert Department.from_key("technical") is Department.technical
     assert Department.from_key("marketing") is None
 
+    # A rubric survives being copied, parts and fallback marking alike. `copy.deepcopy`
+    # of a dict of options is what a caller builds before `choose_among`, and a bare
+    # string copied fine before this feature existed.
+    class Copied(Choice):
+        billing = copy.deepcopy(option("Payments", examples=["My card was charged twice"]))
+        sales = copy.deepcopy(fallback("Pricing"))
+
+    assert Copied.rubric() == (
+        ("billing", "Payments\nExamples: My card was charged twice"),
+        ("sales", "Pricing"),
+    )
+    assert Copied.fallback_member() is Copied.sales
+
 
 def test_levels_are_totally_ordered_by_declaration() -> None:
     class Frustration(Levels):
@@ -136,6 +249,18 @@ REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _duplicate_choice_rubric,
     _duplicate_level_rubric,
     _fallback_on_a_level,
+    _examples_attached_to_a_blank_rubric,
+    _an_examples_clause_written_empty,
+    _examples_given_as_one_string,
+    _an_empty_tuple_written_out,
+    _a_blank_example,
+    _a_newline_in_an_example,
+    _a_carriage_return_in_a_counterexample,
+    _a_repeated_example,
+    _a_counterexample_on_a_level,
+    _one_example_of_two_options,
+    _one_example_of_two_levels,
+    _an_example_that_is_also_a_counterexample,
 ]
 
 REFUSED_IDS = [
@@ -147,6 +272,18 @@ REFUSED_IDS = [
     "two_options_with_the_same_rubric",
     "two_levels_with_the_same_rubric",
     "a_fallback_marker_on_a_levels",
+    "examples_attached_to_a_blank_rubric",
+    "an_examples_clause_written_empty",
+    "examples_given_as_one_string",
+    "an_empty_tuple_written_out",
+    "a_blank_example",
+    "a_newline_in_an_example",
+    "a_carriage_return_in_a_counterexample",
+    "a_repeated_example",
+    "a_counterexample_on_a_level",
+    "one_example_of_two_options",
+    "one_example_of_two_levels",
+    "an_example_that_is_also_a_counterexample",
 ]
 
 

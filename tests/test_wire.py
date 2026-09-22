@@ -37,6 +37,7 @@ from guideme import (
     UnsureError,
     choose,
     fallback,
+    option,
     score,
 )
 from guideme.api import NoulAnswer, Request, Response, question_to_wire, request_to_wire
@@ -559,6 +560,48 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
     _ = score_levels("How cross?", "abc")
 
 
+def _a_runtime_level_with_counterexamples(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # `level(...)` offers no counterexamples, so this is an `option(...)` written where a
+    # level belongs. Rendering "Not this option" onto an ordered scale is meaningless and
+    # dropping what it carries is silent, so the constructor refuses it.
+    _ = score_levels("How cross?", [option("Calm", counterexamples=["shouting"]), "Cross"])
+
+
+def _a_fallback_as_a_runtime_option(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # `choose_among` answers in a `Key`, so there is no member for the marking to name.
+    # Accepting it and dropping it would leave the caller believing an unsure answer is
+    # handled when it raises instead. Same for the two below.
+    _ = choose_among("Which team?", {"sales": fallback("Pricing"), "billing": "Money"})
+
+
+def _a_fallback_as_a_runtime_level(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = score_levels("How cross?", [fallback("Calm"), "Cross"])
+
+
+def _a_fallback_as_a_noul_criterion(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = noul("Urgent?").criteria(fallback("Needs a person now"), "Can wait")
+
+
+def _one_example_of_two_runtime_options(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # One input cannot belong to two options. The reverse -- an example of one and a
+    # counterexample of another -- is legal and is what tells confusable options apart.
+    _ = choose_among(
+        "Which team?",
+        {
+            "billing": option("Money", examples=["Where is my refund?"]),
+            "technical": option("Bugs", examples=["Where is my refund?"]),
+        },
+    )
+
+
+def _one_example_of_both_noul_criteria(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # A yes and a no are two alternatives of one question, so the same rule holds there.
+    _ = noul("Urgent?").criteria(
+        option("Needs a person now", examples=["the export is broken"]),
+        option("Can wait", examples=["the export is broken"]),
+    )
+
+
 def _events_log_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
     # Asking for log records where `opentelemetry-api` has no logs API is refused where
     # it is asked for. The alternative is a guide that emits none and never says so.
@@ -597,6 +640,12 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         _an_api_key_of_spaces,
         _an_empty_model,
         _levels_given_as_one_string,
+        _a_runtime_level_with_counterexamples,
+        _a_fallback_as_a_runtime_option,
+        _a_fallback_as_a_runtime_level,
+        _a_fallback_as_a_noul_criterion,
+        _one_example_of_two_runtime_options,
+        _one_example_of_both_noul_criteria,
         _events_log_without_the_logs_api,
         _events_both_without_the_logs_api,
         _events_log_with_a_drifted_log_record,
@@ -610,6 +659,12 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         "api_key_of_spaces",
         "empty_model",
         "levels_given_as_one_string",
+        "a_runtime_level_with_counterexamples",
+        "a_fallback_as_a_runtime_option",
+        "a_fallback_as_a_runtime_level",
+        "a_fallback_as_a_noul_criterion",
+        "one_example_of_two_runtime_options",
+        "one_example_of_both_noul_criteria",
         "events_log_without_the_logs_api",
         "events_both_without_the_logs_api",
         "events_log_with_a_drifted_log_record",

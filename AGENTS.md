@@ -8,7 +8,7 @@ A Python package that makes a TypeSafe Jev judgment usable as control flow: a ye
 `if`, a choice is an exhaustive `match`, a score is a comparison. One distribution, `guideme`,
 published to PyPI under `MIT OR Apache-2.0`. The public surface has two tiers:
 
-- the 33 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
+- the 35 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
 - `guideme.api` and `guideme.policy` as whole modules, imported by their own path and not
   re-exported at the top level: `guideme.api` is the wire mirror and `guideme.api.client`
   holds `Client` and `AsyncClient`, and `guideme.policy` holds `resolve`.
@@ -40,7 +40,7 @@ two pages: `https://docs.typesafe.ai/api.md` covers `POST /v1/systemone` and
 | `src/guideme/scalars.py` | `Probability`, `Confidence`, `Key`, `Rank`, `ApiKey`, `Model` | validation happens once, here; `ApiKey` never prints |
 | `src/guideme/errors.py` | the `GuidemeError` tree and `kind` | `kind` is the cross-SDK name and the `error.type` value; imports nothing from `guideme` |
 | `src/guideme/policy.py` | `resolve`, `Policy`, `Thresholds`, `Verdict`, the answer and outcome dataclasses | pure: no I/O, no caller enums, keys and level indices only |
-| `src/guideme/enums.py` | `Choice`, `Levels`, `fallback` | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there |
+| `src/guideme/enums.py` | `Choice`, `Levels`, `option`, `level`, `fallback`, and the internals `render` and the `require_*` checks | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there. `render` is the one place a rubric's examples become wire text, and its output is a cross-SDK contract item. `render`, `require_unshared_examples`, `require_no_counterexamples` and `require_no_fallback` are internal despite their names: they are imported by `question.py` and are in no tier, like `question.validate` |
 | `src/guideme/question.py` | question kinds, constructors, `Ranked`, `Scored`, the unsure ladder | a question is inert until asked; the reader travels with it |
 | `src/guideme/ask.py` | shapes: `encode`, `decode`, `Plan` | ids are `q0..qN` in encounter order, insertion order for a dict |
 | `src/guideme/_ask_overloads.py` | the typed `ask` surfaces | GENERATED; edit `scripts/gen_ask_overloads.py` and run `mise run gen` |
@@ -106,6 +106,32 @@ the rest are checked in review.
   is a `ConfigError` on the class statement; so is `fallback(…)` on a `Levels`, which has
   `.otherwise(level)` instead. Both fire where the enum is written, like the Rust derive's
   compile errors.
+- **A rubric's examples are composed into its text at the wire, and nowhere else.** A rubric's
+  value stays the bare text; `enums.render` is what turns an `option(…)`, `level(…)` or
+  `fallback(…)` into what the model reads, and every site that puts a rubric on the wire —
+  `Choice.rubric()`, `Levels.levels()`, `choose_among`, `score_levels` and
+  `NoulQuestion.criteria` — goes through it, so a rubric cannot arrive having quietly lost what
+  it carries. All three kinds of question take examples: a yes and a no are as confusable as
+  two options, and `option(…)` is the one constructor for a described alternative, so there is
+  no fourth. A bare string and a rubric with no examples render to their own bytes, so an
+  existing caller's request does not move. The rendered string is a contract item shared with
+  every other SDK, stated in `docs/contract.md` and pinned by `spec/vectors/rubric.json`, and
+  so is the order: examples and counterexamples render in the order written, never sorted and
+  never de-duplicated into a set.
+- **A rubric's examples must be consistent, and that is checked where it is written.** A blank
+  or whitespace-only entry, a repeat within one clause, a clause given as one string rather
+  than a sequence of them, an empty clause written out (`examples` and `counterexamples`
+  default to `None`, so any empty sequence was typed), examples attached to a blank rubric,
+  a `fallback(…)` on a runtime path, a `U+000A` or `U+000D` inside an entry, and a
+  counterexample on a level are each a `ConfigError`. The newline test is the literal
+  codepoint, never `str.splitlines()`, which splits on eight and would refuse declarations the
+  Rust SDK accepts; `docs/contract.md` records why.
+  A blank rubric that carries no examples is **not** an error: it means what it meant in 0.1.0,
+  and this release does not redefine it. So are the two contradictions: one
+  string as an example of two alternatives of the same question, and one string as both an
+  example and a counterexample of the same alternative. One string as an example of one
+  alternative and a counterexample of another is **legal and required** — it is the confusable
+  pattern the feature exists for, and `tests/test_rubrics.py` sends it on the wire.
 - **Nothing outside `api/` may see a `pydantic` exception.** A caller's state or instructions
   that pydantic refuses leaves `api/` as a `ConfigError`, and a `NaN` or an infinity is refused
   rather than serialised as `null`.
@@ -159,13 +185,19 @@ is made in `guideme-rust` first, not here.
 
 ## Tests
 
-Few tests, high grade. The ceiling is 43 test functions; a parametrised function counts once.
+Few tests, high grade. The ceiling is 47 test functions; a parametrised function counts once.
 It was 40 before the logs signal, which is user-requested scope that the span assertions could
 not cover: correlation, severity and routing each need a record to look at. The forty-third is
 the pre-publish proof that a log sink which raises reaches neither the caller nor the ask span:
 it asserts the absence of a failure on a path where every other test asserts a presence, so no
-existing test could carry it. Everything else that pass added went into a parameter of a test
-that was already there. A new test must be one of:
+existing test could carry it. Rubric examples added the last four, also user-requested scope:
+the golden rendering table, the passthrough property that proves 0.1.0's bytes have not moved,
+the wire proof that a rendered rubric reaches the request, and a live proof that examples move
+the distribution — one function covering a choice and a noul, because both are the same
+invariant and a second function would buy nothing. Each asserts a different thing about a
+string no existing test looks at.
+Everything else those two passes added went into a parameter of a test that was already there.
+A new test must be one of:
 
 - a property test (`hypothesis`) over a law of `policy.resolve`, the shapes, or the wire types;
 - a wire or contract check through a real local HTTP server (`pytest-httpserver`), asserting on
@@ -280,9 +312,12 @@ green before the tag, not after.
 1. Bump `version` in `pyproject.toml`. Then `uv lock` at the root and `uv lock` inside
    `examples/otlp`: both lock files record the version, and both are resolved with `--locked`.
 2. Move the `Unreleased` notes in `CHANGELOG.md` under the new version with today's date.
-3. Refresh the **What arrives** capture in `docs/observability.md`, or elide the version in it.
-   Its `InstrumentationScope guideme X.Y.Z` lines carry the version the capture was taken at,
-   so they go stale on the first bump and a reader cannot tell a stale capture from a real one.
+3. Leave the **What arrives** capture in `docs/observability.md` alone unless you re-take it.
+   Its `InstrumentationScope guideme X.Y.Z` lines carry the version the run actually emitted,
+   and the prose above it names that version, so a reader can tell the capture's age from a
+   claim about today. Do not edit the version forward to match a release no run produced, and
+   do not delete it either: that loses the provenance permanently. Re-take the capture and
+   update both together, or change nothing.
 4. `mise run check`, then open a pull request and squash-merge it with CI green.
 5. On `main`, at that commit: `git tag -a vX.Y.Z -m vX.Y.Z` and `git push origin vX.Y.Z`. The
    tag ruleset refuses a tag that is later moved or deleted, so tag the commit you mean.

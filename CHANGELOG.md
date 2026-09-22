@@ -4,6 +4,52 @@
 
 Nothing yet.
 
+## 0.1.1 — 2026-09-22
+
+Additive. Nothing that worked in 0.1.0 sends different bytes.
+
+- `option(rubric, examples=…, counterexamples=…)` and `level(rubric, examples=…)` join
+  `fallback(…)`, which now takes the same keywords. All three are exported from `guideme`,
+  bringing `__all__` to 35 names. A rubric written as a bare string keeps working everywhere.
+- The parts are composed into the rubric where it becomes wire text: clauses joined with a
+  newline, items within one joined with `"; "`, in the order written, the text verbatim. A
+  rubric with no examples renders to its own text, byte for byte, so an existing request is
+  unchanged. The rendered string and its order are cross-SDK contract items, stated in
+  `docs/contract.md` and pinned by `spec/vectors/rubric.json`.
+- All three kinds of question take them. `noul("…").criteria(yes, no)` accepts an `option(…)`
+  for either side: a yes and a no are as confusable as two options, and there is no fourth
+  constructor for them.
+- Every site that puts a rubric on the wire renders — `Choice.rubric()`, `Levels.levels()`,
+  `choose_among`, `score_levels` and `NoulQuestion.criteria` — so examples cannot be silently
+  dropped by reaching a runtime constructor.
+- `level(…)` takes no counterexamples: "not this option" means nothing on an ordered scale. An
+  `option(…)` carrying counterexamples written where a level belongs is a `ConfigError`, as is
+  a blank or whitespace-only entry, a repeat within one clause, examples attached to a blank
+  rubric, and an empty clause written out: `examples` and `counterexamples` default to `None`,
+  so any empty sequence that arrives was typed on purpose and says nothing. A blank rubric
+  carrying no examples is untouched — it means what it meant in 0.1.0.
+- Contradictory examples are a `ConfigError` too: one string as an example of two alternatives
+  of the same question, or as both an example and a counterexample of the same alternative. One
+  string as an example of one alternative and a counterexample of another stays legal — that is
+  the confusable-options pattern the feature exists for.
+- A clause given as one string is refused rather than shredded. A `str` is a `Sequence[str]` of
+  its own characters, so `examples="refund"` would have become six one-letter examples and no
+  type checker would have said so; it is a `ConfigError` naming the mistake, the same way
+  `score_levels` already refuses a scale given as one string.
+- `fallback(…)` is refused by `choose_among`, `score_levels` and `noul(…).criteria(…)`. Those
+  answer in a `Key`, a `Rank` and a `bool`, none of which has a member to fall back to, so the
+  marking had nothing to act on and was being dropped in silence. Use `.otherwise(…)` on the
+  question, which is what the `Levels` rule has always said.
+- An example or counterexample containing `U+000A` or `U+000D` is refused. Items are joined
+  onto one line, so a newline inside one would read as a clause the rubric never declared. The
+  rubric text itself is unrestricted; only the entries are. `"; "` inside an entry stays legal,
+  because it changes how many examples a reader sees rather than which clause they are in.
+- A rubric built by `option(…)`, `level(…)` or `fallback(…)` can be copied and pickled again.
+  Carrying the parts meant `__new__` took four arguments where `str` hands back one, so
+  `copy.copy`, `copy.deepcopy` and `pickle` raised a `TypeError` — including on the
+  `copy.deepcopy({"key": option(…)})` a caller writes before `choose_among`. A bare string did
+  this in 0.1.0 and does it again.
+
 ## 0.1.0 — 2026-09-21
 
 First release. Everything below is new, so this entry lists the surface rather than the

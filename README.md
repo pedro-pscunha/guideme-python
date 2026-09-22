@@ -104,6 +104,87 @@ A noul can carry `.criteria("what yes means", "what no means")`. Instructions ac
 or any JSON-shaped value, so a question can reference structured data by field name the way
 the TypeSafe docs describe.
 
+### Examples in a rubric
+
+Two alternatives that read alike are told apart by showing inputs rather than by describing
+harder. `option(…)` takes the inputs that belong to an alternative and the ones that belong
+somewhere else, `level(…)` takes the inputs that score at that level, and `fallback(…)` is an
+`option(…)` that also marks the unsure member. All three kinds of question take them: a noul's
+`.criteria(…)` accepts an `option(…)` for the yes and for the no.
+
+```python
+from guideme import Choice, Levels, fallback, level, option
+
+
+class Department(Choice):
+    billing = option(
+        "Payments, invoicing, refunds",
+        examples=["My card was charged twice", "Where is my refund?"],
+        counterexamples=["The dashboard is down"],
+    )
+    technical = option("Bugs, outages, integrations", examples=["502 on every request"])
+    sales = fallback("Pricing, upgrades, new accounts", examples=["Do you have a team plan?"])
+
+
+class Severity(Levels):
+    cosmetic = level("No impact to functionality", examples=["typo in a label"])
+    degraded = level("Broken feature, workaround exists", examples=["export fails in one browser"])
+    blocking = level("No workaround exists", examples=["cannot log in", "data loss"])
+```
+
+The member's value is still the bare rubric; the examples are composed into it only in the
+request, as
+
+```text
+Payments, invoicing, refunds
+Examples: My card was charged twice; Where is my refund?
+Not this option: The dashboard is down
+```
+
+So a rubric with no examples sends exactly what it sent before, and the same strings work in
+`choose_among("…", {"billing": option(…)})` and `score_levels("…", [level(…), …])`. Examples
+and counterexamples render in the order they are written, always: that order is part of the
+published contract.
+
+A yes and a no are two alternatives of one question, so they take examples too, and this is
+where they pay best — a vague pair is the easiest thing to get wrong:
+
+```python
+urgent = noul("Is this ticket urgent?").criteria(
+    option("Urgent", examples=["customers cannot log in", "money is moving to the wrong place"]),
+    option("Not urgent", examples=["a broken job with a manual workaround", "a cosmetic bug"]),
+)
+```
+
+Asked about a nightly export job that has been failing since Tuesday while the numbers are
+pulled by hand, a plain `Urgent` / `Not urgent` answers yes at 0.75. The criteria above answer
+no at 0.17, because one of the not-urgent examples is what the ticket describes.
+
+A string may be an example of one option and a counterexample of another. That is the point
+when two options are confusable, and it is the one overlap that stays legal. Offering the same
+string as an example of two options, or as both an example and a counterexample of the same
+option, says an input belongs where it cannot, so each is refused.
+
+`level(…)` has no counterexamples, because "not this option" means nothing on an ordered
+scale — an input that does not belong at one level scores at another.
+
+Leave a clause out to say there is none. An empty one written out — `examples=[]` or
+`examples=()` — says nothing, so it is refused as the mistake it is, along with a clause given
+as one string rather than a list of them (`examples="refund"` would otherwise be six one-letter
+examples), a blank entry, a repeat within one clause, a newline or carriage return inside an
+entry, a counterexample on a level, a `fallback(…)` given to `choose_among`, `score_levels` or
+`.criteria(…)`, and the two contradictions above. Each is a `ConfigError` where the rubric is
+written.
+
+Entries go on one line each, so a newline inside one would read as a clause you never wrote.
+`"; "` inside an entry is fine — `"card declined; retry failed"` is ordinary prose, and it
+changes how many examples a reader sees rather than which clause they are in. The rubric text
+itself may still contain newlines; only the entries are restricted.
+
+Attaching examples to a blank rubric is refused too, because they describe something that is not
+there. A blank rubric on its own is not: it means what it has always meant, and adding examples
+to the language does not make an old declaration an error.
+
 The state is anything JSON-shaped: a text literal, a `dict`, a list of them. A dataclass goes
 through `dataclasses.asdict`, a pydantic model through `.model_dump()`.
 

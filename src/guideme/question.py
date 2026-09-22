@@ -10,7 +10,14 @@ from dataclasses import dataclass, field, replace
 from typing import Self, final
 
 from guideme._json import Json
-from guideme.enums import Choice, Levels
+from guideme.enums import (
+    Choice,
+    Levels,
+    render,
+    require_no_counterexamples,
+    require_no_fallback,
+    require_unshared_examples,
+)
 from guideme.errors import ConfigError, ProtocolError, UnsureError
 from guideme.policy import (
     MAX_LEVELS,
@@ -325,8 +332,16 @@ class NoulQuestion(_Binary[bool], _Fallible[bool]):
     """A yes/no question read as a `bool`."""
 
     def criteria(self, yes: str, no: str) -> Self:
-        """Describe what a yes and a no mean."""
-        return replace(self, spec=NoulSpec(NoulCriteria(yes, no)))
+        """Describe what a yes and a no mean.
+
+        Either may be an `option(...)` carrying examples, which are composed into it
+        here: a yes and a no are as confusable as two options of a choice, and showing
+        an input that belongs to each is what tells them apart.
+        """
+        require_no_fallback("criteria yes", yes)
+        require_no_fallback("criteria no", no)
+        require_unshared_examples("criteria", (("yes", yes), ("no", no)))
+        return replace(self, spec=NoulSpec(NoulCriteria(render(yes), render(no))))
 
     def detail(self) -> DetailedNoul:
         """Read the full `Verdict` instead. Any `.otherwise(...)` is dropped."""
@@ -432,10 +447,18 @@ def choose_among(instructions: Json, options: Mapping[str, str | None]) -> Choic
     outside it is a `ConfigError` raised here, where the options are written,
     never later at `ask`. Keys cannot collide: a `Mapping` has already made
     them unique.
+
+    A rubric is a string, `None`, or an `option(...)` carrying examples, which
+    are composed into it here: the same text a `Choice` member would send. A
+    `fallback(...)` is a `ConfigError`: this answers in a `Key`, so there is no
+    member for the marking to name; use `.otherwise(...)` on the question.
     """
+    for key, text in options.items():
+        require_no_fallback(f"choose_among option {key!r}", text)
+    require_unshared_examples("choose_among", options.items())
     return _choice(
         instructions,
-        tuple(options.items()),
+        tuple((key, None if text is None else render(text)) for key, text in options.items()),
         Key,
         lambda: None,
     )
@@ -468,6 +491,9 @@ def score_levels(instructions: Json, levels: Sequence[str]) -> ScoreQuestion[Ran
     Takes 2 to 10 levels, the same range a `Levels` enum takes; outside it is a
     `ConfigError`.
 
+    A level is a string or a `level(...)` carrying examples, which are composed
+    into it here: the same text a `Levels` member would send.
+
     A `str` is a `Sequence[str]` of its own characters, so `score_levels("…", "abc")`
     would quietly ask about a three-letter scale. It is a `ConfigError` instead.
     """
@@ -476,4 +502,10 @@ def score_levels(instructions: Json, levels: Sequence[str]) -> ScoreQuestion[Ran
             f"levels must be a sequence of level descriptions, got a single {type(levels).__name__}"
         )
         raise ConfigError(detail)
-    return _score(instructions, tuple(levels), Rank)
+    for index, text in enumerate(levels):
+        require_no_counterexamples(f"level {index}", text)
+        require_no_fallback(f"level {index}", text)
+    require_unshared_examples(
+        "score_levels", ((f"level {index}", text) for index, text in enumerate(levels))
+    )
+    return _score(instructions, tuple(render(text) for text in levels), Rank)

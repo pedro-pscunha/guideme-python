@@ -97,6 +97,45 @@ Each module survives the test.
   an error span status rather than an error-level record. Anything without a convention is
   namespaced `guideme.`. The package depends on `opentelemetry-api` only and installs no
   provider; `docs/observability.md` shows the exporter side.
+- **A rubric's examples are flattened into its text, not sent as structured criteria.** The
+  TypeSafe API takes structured `criteria`, and `docs.typesafe.ai/primitives/choice.md`
+  documents exactly the `what` / `not_for` / `examples` object this surface wants. It is not
+  used, for three measured reasons. A score answer echoes its criteria back in `legend`, which
+  is `dict[str, str]` here and `BTreeMap<u8, String>` in Rust; object criteria come back as
+  objects and fail to parse, so sending them means a breaking change to a public type — in a
+  field neither SDK reads beyond its length. Flattening is as good: on the docs' own worked
+  example, flattened scored 1.01 against structured's 1.03 at a higher confidence, and on an
+  ambiguous choice both reached the option that bare strings miss, inside run-to-run variance.
+  And flattening is cheaper: identical content billed 400 input tokens flattened against 450
+  structured. The gain comes from the examples being present, not from the JSON shape. So
+  `option(…)`, `level(…)` and `fallback(…)` carry the parts on a `str` subclass and `render`
+  composes them where the rubric becomes wire text — the wire schema, `spec/`, and every
+  existing golden vector untouched.
+- **The rendered rubric is a contract item, and the renderer has one entry per wire site.**
+  Clauses join with a newline and items with `"; "`, in the order written, and the text is used
+  verbatim: a newline rather than a space is what removes the need for a punctuation rule,
+  since an example ending in `?` would otherwise render as `Where is my refund?.`. The
+  `Not this option` label was measured against `Not` and `Counterexamples` and won.
+  `Choice.rubric()`, `Levels.levels()`, `choose_among`, `score_levels` and
+  `NoulQuestion.criteria` all render, so a value that reached a runtime constructor cannot
+  silently lose its examples. Rust renders the same string, which leaves one deliberate
+  asymmetry: `choose_among` here takes an `option(…)`, while Rust's equivalent keeps taking a
+  plain string rather than risk inference breakage for existing callers. Equivalent inputs put
+  identical bytes on the wire.
+- **A noul's criteria take examples too, and through the same `option(…)`.** A yes and a no are
+  two described alternatives of one question, exactly as confusable as two options of a choice,
+  and measurement says so: asked whether a nightly export job with a manual workaround is
+  urgent, plain `Urgent` / `Not urgent` answers yes at 0.75 four times running, and the same
+  criteria carrying examples answer no at 0.17. The examples move it to the correct answer,
+  because one of the no examples is the situation the state describes. So there is no fourth
+  constructor — `option(…)` is "a described alternative" and serves both — and `.criteria(…)`
+  renders like every other wire site.
+- **Contradictory examples are refused where they are written.** One string offered as an
+  example of two alternatives of the same question says an input belongs to both, which cannot
+  be true; one string offered as both an example and a counterexample of the same alternative
+  says it does and does not belong. Both are a `ConfigError`. The overlap that looks similar
+  and is the whole point stays legal: the same string as an example of one alternative and a
+  counterexample of another is how two confusable ones are told apart.
 - **An answer is a span event and a log record, and the caller picks.** Rust emits one
   `tracing` event and lets the subscriber fan it out, so its example filters events off the
   span exporter to store each one once. There is no subscriber here, so the library makes both
@@ -123,6 +162,26 @@ Each module survives the test.
   statement, naming the members that repeat.
 - **`Key` and `Rank`** are only meaningful through `choose_among` and `score_levels`. They are
   `NewType`s over `str` and `int`, so nothing else hands you one.
+- **A rubric's value is its bare text, examples or not.** `option("x", examples=[…])` still
+  equals `"x"`, so two options whose text matches are still one member however their examples
+  differ, and a member's `.value` still reads as it was written. The expansion happens only in
+  the request.
+- **A blank rubric is an error only when examples are attached to it.** `option("   ")` on its
+  own is accepted and means exactly what a bare `""` member has always meant;
+  `option("   ", examples=[…])` is a `ConfigError`. The first version of this refused any blank
+  rubric written through the new constructors, which read as tidy and was wrong: it made a
+  declaration that was legal in 0.1.0 illegal in a patch release, on a degenerate input that
+  was already meaningless. "You attached examples to nothing" is the real mistake; "your
+  description is blank" is not one this release gets to invent. `guideme-rust` narrowed the
+  same rule from the same starting point, so a reader of both finds one rule: strict where
+  examples are, untouched where they are not. Revisit at a major bump, together.
+- **A clause left out is `None`; an empty one was written on purpose.** `examples` and
+  `counterexamples` default to `None`, which is how "there are none" is said, so any empty
+  sequence that arrives was typed by the caller and says nothing — a `ConfigError`, whatever
+  its type, `[]` and `()` alike. The alternative, defaulting to `()` and telling the two apart
+  by identity, would have rested on CPython interning the empty tuple: correct today, and
+  silently wrong on a runtime that does not, with a real caller mistake quietly no longer
+  caught. `is None` needs no such assumption.
 - **The four scalars are brands, not validated types.** `Probability`, `Confidence`, `Key` and
   `Rank` are `NewType`s, so `Probability(2.0)` and `Rank(99)` are accepted by the checker and by
   the interpreter alike. What makes them trustworthy is that only the wire mints them, and it
