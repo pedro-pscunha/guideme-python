@@ -140,7 +140,7 @@ examples is never refused for its text, whatever that text is: it means what it 
 this feature existed, and a patch release does not get to redefine it. Attaching examples to a
 blank rubric is the error, because they describe something that is not there. Both SDKs draw
 the line in the same place — Python inside `option()`, `level()` and `fallback()`, Rust in the
-derive and in `Rubric::into_wire()` — so a declaration is legal in both or in neither.
+derive and in `Rubric::render` — so a declaration is legal in both or in neither.
 
 **"Blank" means Unicode `White_Space`.** Rust's `str::trim` is exactly that property. Python's
 `str.strip()` is a superset: measured against the current runtime it strips 29 codepoints to
@@ -170,11 +170,53 @@ the answer. Duplication asks whether two entries would put the same bytes in fro
 model, and a leading space does change that, because the text is rendered verbatim. Trimming
 for one and not the other is the only pairing that keeps both questions honest.
 
-One asymmetry is deliberate. `choose_among` and `score_levels` here take an `option(…)` or a
-`level(…)` value; Rust's equivalents keep taking a plain string, because widening their
-signatures risks inference breakage for existing callers on a path that can already pass a
-string its own renderer composed. It is revisited at 0.2.0. Equivalent inputs put identical
-bytes on the wire either way, which is what the contract actually promises.
+Both SDKs' runtime constructors take a rubric that carries examples — `option(…)` and
+`level(…)` here, `Rubric` in Rust — and every rule above holds on **every** path, declaration
+and runtime alike, in both: the rules a single rubric can see, the cross-option shared-example
+rule, and the no-counterexample-on-a-level rule. Where they fire differs and nothing else
+does. Python refuses the declaration where it is written, as a `ConfigError`; Rust refuses it
+when the question is asked, as an `Error::Config`, because its constructors are infallible
+values by design. A declaration is legal in both or in neither.
+
+### The interface shape, beyond the wire
+
+Two items of §4 of the published statement that this package satisfies, written here because
+what they promise is behaviour a caller can see rather than bytes `spec/` can pin.
+
+**A receipt.** Alongside the answer, a caller can read the response's `model` — the versioned
+id that answered, never the alias that was asked for — and its `usage`, the `input_tokens` and
+`output_tokens` of the one request. Here that is `ask_with_receipt` returning `Receipt[T]` with
+`answer`, `model` and `usage`; in Rust, `Guide::ask_with_receipt` returning
+`Receipt<T> { answer, model, usage }`.
+
+**Retry policy.** `429` and `529` are retried with exponential backoff honouring an integer
+`retry-after`, on `POST /v1/systemone` and on `GET /v1/models` alike. A connection failure —
+the request never reached a server: connect refused or reset, TLS handshake failure — is
+retried inside the same budget. **A timeout of any phase** (connect, read, write) and a body
+failure are not.
+
+The timeout rule is the one place where the wider language wins and the narrower one is held
+to it. Rust sets a single deadline over the whole attempt, under which a connect-phase
+timeout is indistinguishable from a read timeout: `reqwest` reports it as `is_timeout()`, not
+`is_connect()`. Python can tell them apart — `httpx.ConnectTimeout` is its own class — and
+declines to, because an SDK that resent one failure the other could not see would be the two
+disagreeing about the same incident. A retried timeout also multiplies the wall time the
+builder's `timeout` promises, which is the one number a caller sets to bound a call. So the
+contract excludes every timeout and both SDKs implement that exclusion.
+
+After the last retry a `429` is a rate-limited error carrying the `retry-after` and a `529`
+is an overloaded error carrying it too.
+
+### One divergence, and it is the language's
+
+`timeout` means different things in the two SDKs, and no amount of care makes it mean the
+same. Rust's `reqwest` applies a deadline to the whole attempt. `httpx` has no per-request
+deadline and instead spends the budget per phase — connecting, writing, reading, and waiting
+for a pooled connection each get the whole of it — so an attempt that is slow in more than one
+phase outlasts the number written in the builder. Wrapping it to match would need a different
+wrapper for the synchronous and the asyncio surfaces and would change what cancellation means,
+which is a worse trade than saying so. It is documented on `GuideBuilder.timeout`, in the
+README's configuration section, and here. Nothing on the wire depends on it.
 
 Drift is caught rather than trusted. `mise run spec-check` clones guideme-rust, diffs its `spec/`
 against this one and fails on any difference except `spec/SOURCE`, which is provenance and has

@@ -10,6 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast, final
 
+import httpx
 import pytest
 from hypothesis import HealthCheck, settings
 from jsonschema import Draft202012Validator
@@ -24,7 +25,7 @@ from pydantic import TypeAdapter
 from pytest_httpserver import HTTPServer
 from pytest_httpserver.httpserver import RequestHandler
 
-from guideme import ApiKey, AsyncGuide, Guide, GuideBuilder, telemetry
+from guideme import ApiKey, AsyncGuide, ConfigError, Guide, GuideBuilder, Receipt, telemetry
 from guideme._json import Json
 from guideme.api import Answer as WireAnswer
 from guideme.api import answer_from_wire
@@ -35,6 +36,7 @@ from guideme.policy import (
     ChoiceOutcome,
     NoulOutcome,
     Outcome,
+    Policy,
     ScoreOutcome,
 )
 from guideme.question import choose_among, noul, score_levels
@@ -226,6 +228,30 @@ def noul_reply(probability: float) -> str:
     return reply({"q0": {"type": "noul", "noul": probability}})
 
 
+MODELS_BODY: Json = {
+    "models": [
+        {
+            "name": MODEL,
+            "description": "The current stable Jev.",
+            "release_date": "2026-02-11",
+        },
+        {
+            "name": "jev-1.12.0",
+            "description": "The Jev before it.",
+            "release_date": "2025-11-04",
+        },
+    ]
+}
+"""A `GET /v1/models` body, as the docs describe one."""
+
+
+def answering_offline(request: httpx.Request) -> httpx.Response:
+    """The whole server one `httpx.MockTransport` test needs: the bearer, then a noul."""
+    assert request.headers["authorization"] == f"Bearer {TEST_KEY}"
+    assert request.url.path == EVALUATE
+    return httpx.Response(200, text=noul_reply(0.95), headers={"content-type": JSON})
+
+
 def expect_post(httpserver: HTTPServer) -> RequestHandler:
     """The handler every `POST /v1/systemone` of one test goes to."""
     return httpserver.expect_request(EVALUATE, method="POST")
@@ -239,6 +265,13 @@ ASYNC: Kind = "async"
 
 type Configure = Callable[[GuideBuilder], GuideBuilder]
 """A test's extra builder settings, applied after the ones every test shares."""
+
+type Handler = Callable[[httpx.Request], httpx.Response]
+"""What an injected `httpx.MockTransport` answers one request with.
+
+A handler may raise instead, which is how a test reaches the connection failures no
+local server can produce on demand.
+"""
 
 
 def kind_of(param: object) -> Kind:
@@ -275,6 +308,34 @@ def client_vars(guide: Guide | AsyncGuide) -> str:
     return repr(vars(inner))
 
 
+BAD_PATCH = Policy(yes_above=2.0)
+"""A policy patch that cannot settle: a threshold outside `0..=1`.
+
+`with_policy` has to refuse it *before* taking a hold on the pool. Settling after the hold
+was taken leaked one per refusal, and nothing downstream could tell: the guide that would
+have held it was never built, so no close was ever coming for it.
+"""
+
+
+def refuse_patches(guide: Guide | AsyncGuide, times: int) -> None:
+    """Offer `BAD_PATCH` to `with_policy` `times` times, requiring each to be refused."""
+    for _ in range(times):
+        with pytest.raises(ConfigError):
+            _ = guide.with_policy(BAD_PATCH)
+
+
+def pool_holders(guide: Guide | AsyncGuide) -> int:
+    """Holds left on a guide's connection pool.
+
+    Private state, read on purpose: "the pool was closed exactly once" is a statement
+    about the count, and a guide that leaks one looks identical from the outside to a
+    guide that released it.
+    """
+    # pylint: disable=protected-access  # the lifecycle proof reads what is private on purpose
+    client = guide._client  # noqa: SLF001 # pyright: ignore[reportPrivateUsage] -- lifecycle proof
+    return client._pool.holders  # noqa: SLF001 # pyright: ignore[reportPrivateUsage] -- same
+
+
 def configured(base_url: str, configure: Configure | None = None) -> GuideBuilder:
     """The builder every local-server test starts from: the test key, that origin, 10 ms backoff."""
     builder = (
@@ -299,6 +360,18 @@ def _entry(guide: Guide) -> Callable[[object, Json], object]:
 def async_entry(guide: AsyncGuide) -> Callable[[object, Json], Awaitable[object]]:
     """`AsyncGuide.ask`, widened for the same reason as `_entry`."""
     return cast("Callable[[object, Json], Awaitable[object]]", guide.ask)
+
+
+def _receipt_entry(guide: Guide) -> Callable[[object, Json], Receipt[object]]:
+    """`Guide.ask_with_receipt`, widened for the same reason as `_entry`."""
+    return cast("Callable[[object, Json], Receipt[object]]", guide.ask_with_receipt)
+
+
+def _async_receipt_entry(
+    guide: AsyncGuide,
+) -> Callable[[object, Json], Awaitable[Receipt[object]]]:
+    """`AsyncGuide.ask_with_receipt`, widened for the same reason as `_entry`."""
+    return cast("Callable[[object, Json], Awaitable[Receipt[object]]]", guide.ask_with_receipt)
 
 
 @final
@@ -333,18 +406,95 @@ class Runner:
         finally:
             await guide.close()
 
-    def models(self) -> tuple[ModelInfo, ...]:
+    def offline(self, shape: object, state: Json, handler: Handler) -> object:
+        """Ask through a caller-supplied transport: no server, no socket, no port.
+
+        Which setter carries it is the one thing the two kinds cannot share, because a
+        builder refuses to build a guide of one kind from the other kind's transport.
+        """
+        transport = httpx.MockTransport(handler)
+        if self.kind == SYNC:
+            with self._builder(lambda builder: builder.transport(transport)).build() as guide:
+                return _entry(guide)(shape, state)
+        return asyncio.run(self._offline_async(shape, state, transport))
+
+    async def _offline_async(
+        self, shape: object, state: Json, transport: httpx.MockTransport
+    ) -> object:
+        def settle(builder: GuideBuilder) -> GuideBuilder:
+            return builder.async_transport(transport)
+
+        async with self._builder(settle).build_async() as guide:
+            return await async_entry(guide)(shape, state)
+
+    def receipt(self, shape: object, state: Json) -> Receipt[object]:
+        """Ask `shape` about `state` and return the whole receipt, not only the answer."""
+        if self.kind == SYNC:
+            with self._builder(None).build() as guide:
+                return _receipt_entry(guide)(shape, state)
+        return asyncio.run(self._receipt_async(shape, state))
+
+    async def _receipt_async(self, shape: object, state: Json) -> Receipt[object]:
+        async with self._builder(None).build_async() as guide:
+            return await _async_receipt_entry(guide)(shape, state)
+
+    def paired(
+        self, shape: object, state: Json, closes: int, refused: int
+    ) -> tuple[list[object], int]:
+        """Three asks across a guide and one derived from it, closing the derived one.
+
+        Both are entered as context managers, so the derived guide is closed `closes`
+        times in all: `closes - 1` by hand inside its block, and once more by leaving it.
+        The parent only ever releases at the very end, so all three asks must answer, and
+        that is the whole invariant. One close of the derived guide must not take the
+        parent's hold, and neither must a second: a guide closed twice releases once.
+
+        `refused` policy patches are offered to `with_policy` first and must each be
+        refused; a refusal that took a hold on the way to raising shows up in the count
+        at the end, because no guide exists to release it.
+
+        Returns the three answers and the holds left on the pool once both guides have
+        left their blocks, which must be zero. Without that count a guide that leaked a
+        hold would pass: the asks all answer either way, and the difference between
+        releasing once and never releasing at all is only visible here.
+        """
+        if self.kind == SYNC:
+            with self._builder(None).build() as guide:
+                refuse_patches(guide, refused)
+                with guide.with_policy(Policy()) as derived:
+                    first = _entry(derived)(shape, state)
+                    for _ in range(closes - 1):
+                        derived.close()
+                    second = _entry(guide)(shape, state)
+                answers = [first, second, _entry(guide)(shape, state)]
+            return (answers, pool_holders(guide))
+        return asyncio.run(self._paired_async(shape, state, closes, refused))
+
+    async def _paired_async(
+        self, shape: object, state: Json, closes: int, refused: int
+    ) -> tuple[list[object], int]:
+        async with self._builder(None).build_async() as guide:
+            refuse_patches(guide, refused)
+            async with guide.with_policy(Policy()) as derived:
+                first = await async_entry(derived)(shape, state)
+                for _ in range(closes - 1):
+                    await derived.close()
+                second = await async_entry(guide)(shape, state)
+            answers = [first, second, await async_entry(guide)(shape, state)]
+        return (answers, pool_holders(guide))
+
+    def models(self, configure: Configure | None = None) -> tuple[ModelInfo, ...]:
         """`GET /v1/models` through this kind's executor."""
         if self.kind == SYNC:
-            guide = self._builder(None).build()
+            guide = self._builder(configure).build()
             try:
                 return guide.models()
             finally:
                 guide.close()
-        return asyncio.run(self._models_async())
+        return asyncio.run(self._models_async(configure))
 
-    async def _models_async(self) -> tuple[ModelInfo, ...]:
-        guide = self._builder(None).build_async()
+    async def _models_async(self, configure: Configure | None) -> tuple[ModelInfo, ...]:
+        guide = self._builder(configure).build_async()
         try:
             return await guide.models()
         finally:

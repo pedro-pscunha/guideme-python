@@ -26,10 +26,19 @@ from guideme.api import (
     question_to_wire,
     request_to_wire,
 )
-from guideme.api.client import DEFAULT_BASE_URL, AsyncClient, Client, Endpoint, RetryPolicy
+from guideme.api.client import (
+    DEFAULT_BASE_URL,
+    AsyncClient,
+    AsyncTransport,
+    Client,
+    Endpoint,
+    RetryPolicy,
+    Transport,
+)
 from guideme.ask import Claim, Plan, decode, encode
 from guideme.errors import ConfigError, GuidemeError, ProtocolError
 from guideme.policy import Outcome, Policy, Thresholds, resolve
+from guideme.receipt import Receipt, Usage
 from guideme.scalars import ApiKey, Model
 from guideme.telemetry import (
     EVENT_MODES,
@@ -50,6 +59,15 @@ BASE_URL_VAR = "TYPESAFE_BASE_URL"
 
 MODEL_VAR = "GUIDEME_MODEL"
 """Optional model override for `from_env`."""
+
+_BOTH_TRANSPORTS = (
+    "transport and async_transport cannot both be set; a builder carrying both can build "
+    "neither kind of guide, so the second one is refused where it is written"
+)
+"""Why only one transport may be set. One builder produces one guide, and `build()` refuses
+an async transport while `build_async()` refuses a sync one, so a builder holding both is
+already unbuildable; saying so at the setter beats two build errors that each name the
+other setter."""
 
 DEFAULT_TIMEOUT = timedelta(seconds=30)
 """How long one phase of one attempt may take.
@@ -166,6 +184,19 @@ def _finish(span: Span, prepared: _Prepared, response: Response, events: Events)
     return decode(prepared.claim, reply)
 
 
+def _receipt(answer: object, response: Response) -> Receipt[object]:
+    """Put one answered shape beside what the response said it cost and what produced it.
+
+    The two counts are copied out of the wire model rather than handed over inside it,
+    so what a caller holds is this package's own value object. `_described` does the same
+    for `models()`, and for the same reason.
+    """
+    usage = Usage(
+        input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens
+    )
+    return Receipt(answer=answer, model=response.model, usage=usage)
+
+
 def _merged(config: _Config, policy: Policy) -> _Config:
     """Patch a policy over a guide's, settling it now so a bad patch fails where it is written."""
     merged = policy.over(config.policy)
@@ -190,7 +221,15 @@ def _describe(kind: str, config: _Config, endpoint: Endpoint) -> str:
 
 @final
 class Guide(SyncAskOverloads):
-    """A configured entry point to Jev. Build one and share it; it owns a connection pool."""
+    """A configured entry point to Jev. Build one and share it; it owns a connection pool.
+
+    Share it across threads: a guide is frozen configuration over one `httpx.Client`, and
+    both are safe to use from several threads at once. One guide asking concurrently is
+    what the pool is for. Building one per request works and opens a pool per request,
+    which is the cost the pool exists to avoid. Close it once, by hand or by leaving a
+    `with` block; a guide derived with `with_policy` is a second holder of the same pool
+    and closing it leaves this one able to ask.
+    """
 
     def __init__(self, client: Client, config: _Config) -> None:
         """Wrap a built client. Use `Guide.from_env` or `Guide.builder` instead."""
@@ -210,21 +249,42 @@ class Guide(SyncAskOverloads):
     def with_policy(self, policy: Policy) -> "Guide":
         """A guide sharing this client, with `policy` patched over this one's.
 
-        The connection pool is shared, so `close()` on either guide closes it for both.
+        The connection pool is shared and counted: the guide returned here is a second
+        holder of it, so closing either one leaves the other able to ask and the pool
+        closes when the last of them does. Each guide holds and releases on its own, so
+        closing one of them twice releases once and never touches the other's hold.
+
+        The patch is settled before the hold is taken. Python evaluates arguments left to
+        right, so building the guide in one expression took the hold first and leaked it
+        when a bad patch raised: the pool was left holding a client that never existed.
+
+        Raises:
+            ConfigError: the patched policy's thresholds are out of range, or this guide
+                has already been closed, so there is no hold to share.
         """
-        return Guide(self._client, _merged(self._config, policy))
+        config = _merged(self._config, policy)
+        return Guide(self._client.share(), config)
+
+    def __enter__(self) -> Self:
+        """Enter a `with` block. The guide is ready to ask before this; nothing is opened here."""
+        return self
+
+    def __exit__(self, kind: object, error: object, traceback: object) -> None:
+        """Leave a `with` block by closing this guide. Nothing is suppressed."""
+        self.close()
 
     def models(self) -> tuple[ModelInfo, ...]:
         """The models this account may use. No ask span of its own.
 
-        One `GET /v1/models`, never retried: unlike `ask`, a `429` or a `529` raises on the
-        first attempt rather than after a backoff.
+        One `GET /v1/models`, resent on exactly the terms an ask is: a `429` or a `529`
+        waits out the backoff and goes again, and a connection failure does too. A `429`
+        while a process is starting up therefore does not fail the start.
 
         Raises:
             AuthError: the key was missing or rejected.
             InvalidError: the API rejected the request (`422`).
-            RateLimitedError: the API answered `429`.
-            OverloadedError: the API answered `529`.
+            RateLimitedError: still throttled after the retries (`429`).
+            OverloadedError: still overloaded after the retries (`529`).
             TransportError: the request never completed.
             UnexpectedStatusError: any other status.
             ProtocolError: the body did not match the contract.
@@ -241,6 +301,10 @@ class Guide(SyncAskOverloads):
 
     @override
     def _ask(self, shape: object, state: Json) -> object:
+        return self._ask_with_receipt(shape, state).answer
+
+    @override
+    def _ask_with_receipt(self, shape: object, state: Json) -> Receipt[object]:
         prepared = _prepare(shape, state, self._config)
         with _open(prepared, self._config, self._client.endpoint) as span:
             try:
@@ -249,12 +313,20 @@ class Guide(SyncAskOverloads):
             except GuidemeError as error:
                 fail_ask(span, error)
                 raise
-            return decoded
+            return _receipt(decoded, response)
 
 
 @final
 class AsyncGuide(AsyncAskOverloads):
-    """A configured entry point to Jev for `asyncio`. The same surface as `Guide`."""
+    """A configured entry point to Jev for `asyncio`. The same surface as `Guide`.
+
+    Share it across tasks: a guide is frozen configuration over one `httpx.AsyncClient`,
+    and concurrent asks from one guide are what the pool is for — `asyncio.gather` over
+    a batch of them is the intended shape. It belongs to the event loop it was built on.
+    Close it once, by hand or by leaving an `async with` block; a guide derived with
+    `with_policy` is a second holder of the same pool and closing it leaves this one able
+    to ask.
+    """
 
     def __init__(self, client: AsyncClient, config: _Config) -> None:
         """Wrap a built client. Use `AsyncGuide.from_env` or `AsyncGuide.builder` instead."""
@@ -274,21 +346,42 @@ class AsyncGuide(AsyncAskOverloads):
     def with_policy(self, policy: Policy) -> "AsyncGuide":
         """A guide sharing this client, with `policy` patched over this one's.
 
-        The connection pool is shared, so `close()` on either guide closes it for both.
+        The connection pool is shared and counted: the guide returned here is a second
+        holder of it, so closing either one leaves the other able to ask and the pool
+        closes when the last of them does. Each guide holds and releases on its own, so
+        closing one of them twice releases once and never touches the other's hold.
+
+        The patch is settled before the hold is taken. Python evaluates arguments left to
+        right, so building the guide in one expression took the hold first and leaked it
+        when a bad patch raised: the pool was left holding a client that never existed.
+
+        Raises:
+            ConfigError: the patched policy's thresholds are out of range, or this guide
+                has already been closed, so there is no hold to share.
         """
-        return AsyncGuide(self._client, _merged(self._config, policy))
+        config = _merged(self._config, policy)
+        return AsyncGuide(self._client.share(), config)
+
+    async def __aenter__(self) -> Self:
+        """Enter an `async with` block. Nothing is opened here; the guide is already ready."""
+        return self
+
+    async def __aexit__(self, kind: object, error: object, traceback: object) -> None:
+        """Leave an `async with` block by closing this guide. Nothing is suppressed."""
+        await self.close()
 
     async def models(self) -> tuple[ModelInfo, ...]:
         """The models this account may use. No ask span of its own.
 
-        One `GET /v1/models`, never retried: unlike `ask`, a `429` or a `529` raises on the
-        first attempt rather than after a backoff.
+        One `GET /v1/models`, resent on exactly the terms an ask is: a `429` or a `529`
+        waits out the backoff and goes again, and a connection failure does too. A `429`
+        while a process is starting up therefore does not fail the start.
 
         Raises:
             AuthError: the key was missing or rejected.
             InvalidError: the API rejected the request (`422`).
-            RateLimitedError: the API answered `429`.
-            OverloadedError: the API answered `529`.
+            RateLimitedError: still throttled after the retries (`429`).
+            OverloadedError: still overloaded after the retries (`529`).
             TransportError: the request never completed.
             UnexpectedStatusError: any other status.
             ProtocolError: the body did not match the contract.
@@ -308,7 +401,15 @@ class AsyncGuide(AsyncAskOverloads):
         """Match the base exactly: a plain call returning something awaitable."""
         return self._answer(shape, state)
 
+    @override
+    def _ask_with_receipt(self, shape: object, state: Json) -> Awaitable[Receipt[object]]:
+        """Match the base exactly: a plain call returning something awaitable."""
+        return self._answer_with_receipt(shape, state)
+
     async def _answer(self, shape: object, state: Json) -> object:
+        return (await self._answer_with_receipt(shape, state)).answer
+
+    async def _answer_with_receipt(self, shape: object, state: Json) -> Receipt[object]:
         prepared = _prepare(shape, state, self._config)
         with _open(prepared, self._config, self._client.endpoint) as span:
             try:
@@ -317,7 +418,7 @@ class AsyncGuide(AsyncAskOverloads):
             except GuidemeError as error:
                 fail_ask(span, error)
                 raise
-            return decoded
+            return _receipt(decoded, response)
 
 
 @final
@@ -335,7 +436,11 @@ class GuideBuilder:
         self._model: Model = Model.latest()
         self._policy: Policy = Policy()
         self._retry: RetryPolicy = RetryPolicy()
-        self._timeout: timedelta = DEFAULT_TIMEOUT
+        # `None` is "the caller never said", which is not the same as "the default", and
+        # only the first of the two may sit beside an injected transport.
+        self._timeout: timedelta | None = None
+        self._transport: Transport | None = None
+        self._async_transport: AsyncTransport | None = None
         self._record_state: bool = False
         self._events: Events = "both"
 
@@ -414,18 +519,70 @@ class GuideBuilder:
     def timeout(self, per_attempt: timedelta) -> Self:
         """Timeout for one phase of one attempt; 30 s by default.
 
-        `httpx` applies it to connecting, writing, reading and pool acquisition
-        separately rather than as one deadline for the attempt, so an attempt that is
-        slow in more than one phase can outlast it. See `DEFAULT_TIMEOUT`.
+        **This is not a deadline for the attempt.** `httpx` gives the whole budget to
+        each phase separately — connecting, writing, reading, and waiting for a pooled
+        connection — so one attempt that is slow in more than one phase takes longer
+        than `per_attempt` and is not in breach of anything. Worst case for a call is
+        `(max_retries + 1)` attempts of several phases each, plus the backoff between
+        them. Rust's `reqwest` deadline covers the attempt as a whole instead; the two
+        SDKs differ here because their HTTP clients do, and `docs/contract.md` records
+        it as a divergence rather than leaving a reader to find it.
+
+        A timeout belongs to the transport that honours it, so this and
+        `transport(...)`/`async_transport(...)` refuse each other in whichever order
+        they are written. An injected transport decides its own deadlines, and `httpx`
+        hands it this budget as a request extension it is free to ignore — as
+        `httpx.MockTransport` does — so accepting both would promise a timeout that
+        nothing applies.
 
         Raises:
-            ConfigError: `per_attempt` is zero or negative.
+            ConfigError: `per_attempt` is zero or negative, or a transport is already set.
         """
         if per_attempt <= timedelta():
             detail = f"timeout {per_attempt} is not positive"
             raise ConfigError(detail)
+        if self._transport is not None or self._async_transport is not None:
+            detail = "timeout and an injected transport conflict; the transport owns its deadlines"
+            raise ConfigError(detail)
         self._timeout = per_attempt
         return self
+
+    def transport(self, transport: Transport) -> Self:
+        """Send through this `httpx.BaseTransport` rather than one `httpx` opens.
+
+        A proxy, a client certificate, or an `httpx.MockTransport` that answers a test
+        without a socket — the README's "Testing your code" section is the last of those
+        written out. It is used by `build()`; `build_async()` needs `async_transport`.
+
+        Raises:
+            ConfigError: `timeout(...)` or `async_transport(...)` is already set.
+        """
+        self._refuse_a_timeout("transport")
+        if self._async_transport is not None:
+            raise ConfigError(_BOTH_TRANSPORTS)
+        self._transport = transport
+        return self
+
+    def async_transport(self, transport: AsyncTransport) -> Self:
+        """Send through this `httpx.AsyncBaseTransport` rather than one `httpx` opens.
+
+        The asyncio half of `transport`, used by `build_async()`. `httpx.MockTransport`
+        is both kinds at once, so one of those can be given to either setter.
+
+        Raises:
+            ConfigError: `timeout(...)` or `transport(...)` is already set.
+        """
+        self._refuse_a_timeout("async_transport")
+        if self._transport is not None:
+            raise ConfigError(_BOTH_TRANSPORTS)
+        self._async_transport = transport
+        return self
+
+    def _refuse_a_timeout(self, setter: str) -> None:
+        """Refuse a transport written after a timeout, as `timeout` refuses the other order."""
+        if self._timeout is not None:
+            detail = f"{setter} and timeout conflict; the transport owns its deadlines"
+            raise ConfigError(detail)
 
     def events(self, where: Events) -> Self:
         """Where an answer and a retry are written: `"span"`, `"log"` or `"both"`.
@@ -463,21 +620,38 @@ class GuideBuilder:
 
         Raises:
             ConfigError: no API key was set, the `base_url` is malformed or
-                carries credentials, or the policy's thresholds are out of range.
+                carries credentials, the policy's thresholds are out of range, or
+                `async_transport(...)` was set, which only `build_async` can use.
         """
+        if self._async_transport is not None:
+            detail = "build() cannot use an async_transport; use build_async() or transport()"
+            raise ConfigError(detail)
         key, endpoint, config = self._settle()
-        return Guide(Client(key, endpoint, self._retry, self._timeout, self._events), config)
+        client = Client(
+            key, endpoint, self._retry, self._settled_timeout(), self._events, self._transport
+        )
+        return Guide(client, config)
 
     def build_async(self) -> AsyncGuide:
         """Build an asyncio guide, validating the policy and the origin now.
 
         Raises:
             ConfigError: no API key was set, the `base_url` is malformed or
-                carries credentials, or the policy's thresholds are out of range.
+                carries credentials, the policy's thresholds are out of range, or
+                `transport(...)` was set, which only `build` can use.
         """
+        if self._transport is not None:
+            detail = "build_async() cannot use a transport; use build() or async_transport()"
+            raise ConfigError(detail)
         key, endpoint, config = self._settle()
-        client = AsyncClient(key, endpoint, self._retry, self._timeout, self._events)
+        client = AsyncClient(
+            key, endpoint, self._retry, self._settled_timeout(), self._events, self._async_transport
+        )
         return AsyncGuide(client, config)
+
+    def _settled_timeout(self) -> timedelta:
+        """The timeout to build with: the caller's, or the default they never overrode."""
+        return DEFAULT_TIMEOUT if self._timeout is None else self._timeout
 
     def _settle(self) -> tuple[ApiKey, Endpoint, _Config]:
         """Everything both builds need, with every check done before a socket is opened."""

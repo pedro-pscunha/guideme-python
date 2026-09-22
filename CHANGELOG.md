@@ -4,6 +4,96 @@
 
 Nothing yet.
 
+## 0.2.0 — 2026-09-22
+
+One breaking change, and it is one nobody outside this repository can have depended on yet.
+Everything else is additive.
+
+### Breaking
+
+- `OverloadedError` now takes the `retry-after` the API sent: `OverloadedError(retry_after)`
+  with a `retry_after` attribute, mirroring `RateLimitedError`. A `529` carries that header as
+  often as a `429` does, and both SDKs were throwing it away on the one path where it is the
+  only thing that says when to come back. Constructing the error by hand is the only code this
+  moves; catching it is unchanged.
+
+### Added
+
+- `ask_with_receipt` on `Guide` and `AsyncGuide`, with the same overload family as `ask`. It
+  returns `Receipt[T]` — `answer`, `model`, `usage` — so cost attribution and pinning a policy
+  to the model version that produced its numbers no longer need an OpenTelemetry pipeline.
+  `ask` is that call followed by `.answer`. `Receipt` and `Usage` are exported from `guideme`,
+  and `Usage` is a frozen dataclass of two `int`s copied out of the wire model, so no
+  pydantic type reaches the top-level surface — the trade `ModelInfo` already makes.
+- `with` and `async with` on the two guides, each closing the guide on the way out. The pool a
+  guide holds is now counted: `with_policy(…)` takes a second hold on it, and closing either
+  guide leaves the other able to ask. Before this, closing a derived guide closed its parent's
+  pool, which was a documented sharp edge and would have been a trap under `with`.
+- `GuideBuilder.transport(…)` and `.async_transport(…)`, taking an `httpx.BaseTransport` and an
+  `httpx.AsyncBaseTransport`. A proxy, a client certificate, or an `httpx.MockTransport` that
+  answers a test with no server, no port and no key — the README's new **Testing your code**
+  section is that test written out. A transport and `timeout(…)` refuse each other in either
+  order, because a custom transport is free to ignore the budget `httpx` hands it and a
+  silent no-op is worse than a `ConfigError`; so does building the wrong kind of guide from
+  one, and so does setting both transports on one builder, which could build neither.
+- `GET /v1/models` is retried on `429` and `529`, through the same loop and the same spans an
+  ask uses. The API's docs say an SDK handles a `429` for you, and a `429` during startup used
+  to fail the start.
+- A failed connection is retried inside the same `max_retries` budget and backoff:
+  `httpx.ConnectError`, which means the request never reached a server, so nothing was
+  judged and nothing is repeated. A disconnect part-way through a response and a body that
+  will not decode are still not retried — the request arrived, and a resend would buy the
+  same judgment twice. **No timeout is retried, of any phase**, `httpx.ConnectTimeout`
+  included: Rust sets one deadline over the whole attempt and cannot tell a connect timeout
+  from a read one, so retrying it here would make the two SDKs disagree about the same
+  failure, and a retried timeout multiplies the wall time `timeout(…)` exists to bound.
+- `guideme.__all__` gains `Question`, `NoulQuestion`, `ChoiceQuestion`, `ScoreQuestion`,
+  `DetailedNoul`, `DetailedChoice`, `DetailedScore`, `Receipt` and `Usage`, reaching 44 names.
+  Annotating a stored question no longer means importing from a module the README calls
+  private. `guideme.api` gains an `__all__` of its own, so `import *` from it stops handing
+  back `BaseModel`, `Field` and `Mapping`; `guideme.question`, `guideme.policy`,
+  `guideme.enums` and `guideme.errors` each gained one too.
+
+### Fixed
+
+- `with_policy(…)` no longer leaks a hold on the connection pool when the patch it is given
+  cannot settle. Python evaluates arguments left to right, so the hold was taken before the
+  patch was validated and nothing released it: the guide that would have was never built.
+  The patch settles first now. A pool that never closes is invisible until a process runs
+  out of sockets, so the regression asserts the count rather than the symptom.
+- The pool's count and every holder's spent-flag are taken under one lock. `Guide`'s
+  docstring says to share a guide across threads, so two threads closing two guides over one
+  pool is a documented thing to do, and a flag read, a flag flip and a decrement are three
+  steps that must not interleave. `ask` is untouched and takes no lock.
+- Closing one guide twice no longer closes the connection pool under a guide derived from it
+  with `with_policy(…)`. `share()` now hands back a distinct client over the shared pool, each
+  carrying its own release-once flag, so a guide releases exactly once however many times it
+  is closed; a count alone cannot tell which holder a release came from. Sharing from an
+  already-closed guide is a `ConfigError` rather than a guide holding nothing.
+
+### Changed
+
+- `guideme.ask` walks a shape through four `TypeGuard` predicates instead of four `cast()`
+  calls. There are now no casts anywhere in `src/guideme`: a `TypeGuard` replaces the narrowed
+  type outright where an annotated assignment only intersects with it, so the element types
+  are `object` rather than unknown and a checker verifies what was being asserted before.
+
+- `guideme.retry` carries `error.type = "transport"` and **no** `http.response.status_code`
+  when the attempt it is resending never got a response. Exactly one of the two is on every
+  such event. A dashboard grouping retries by cause has to tell a throttled API from an
+  unreachable one, so the cause is which field is present. `docs/observability.md` has the
+  table and `docs/contract.md` the retry policy in full.
+
+### Documented
+
+- The timeout's scope, which is per phase in `httpx` and per attempt in Rust's `reqwest`, is
+  now on `GuideBuilder.timeout`, in the README's configuration table and in `docs/contract.md`
+  as a stated divergence rather than something a reader has to find.
+- Concurrency: build one guide, share it across threads or tasks, close it once. It was true
+  before and written down nowhere.
+- `docs/contract.md` drops the rubric asymmetry between the SDKs' runtime constructors, which
+  guideme-rust closed at 0.2.0, and corrects a stale `Rubric::into_wire()` to `Rubric::render`.
+
 ## 0.1.1 — 2026-09-22
 
 Additive. Nothing that worked in 0.1.0 sends different bytes.

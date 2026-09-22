@@ -1,11 +1,18 @@
-import asyncio
+"""What guideme puts on the wire, and what it reads back.
+
+The schemas, the docs examples, the request a shape builds, the errors a malformed
+response raises, the unsure ladder, and what a configuration mistake refuses. Its sibling
+`test_retries.py` holds the other half: a request that fails, is resent, or goes through
+a caller's transport.
+"""
+
 import json
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast, final
 
+import httpx
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -14,26 +21,19 @@ from pytest_httpserver import HTTPServer
 
 from guideme import (
     ApiKey,
-    AuthError,
     Choice,
     Confidence,
     ConfigError,
     Guide,
     GuideBuilder,
-    GuidemeError,
-    InvalidError,
     Key,
     Levels,
     Model,
-    OverloadedError,
     Policy,
     Probability,
     ProtocolError,
     Rank,
     Ranked,
-    RateLimitedError,
-    TransportError,
-    UnexpectedStatusError,
     UnsureError,
     choose,
     fallback,
@@ -41,7 +41,7 @@ from guideme import (
     score,
 )
 from guideme.api import NoulAnswer, Request, Response, question_to_wire, request_to_wire
-from guideme.api.client import EVALUATE, MODELS
+from guideme.api.client import MODELS
 from guideme.ask import Plan, encode
 from guideme.guide import KEY_VAR, ModelInfo
 from guideme.question import Question, choose_among, noul, score_levels
@@ -51,18 +51,16 @@ from .conftest import (
     FIXTURES,
     JSON,
     MODEL,
+    MODELS_BODY,
     TEST_KEY,
     TICKET,
     WIRE_ANSWER,
-    Configure,
     Json,
     Recorded,
     Runner,
+    answering_offline,
     as_object,
-    async_entry,
     attributes,
-    closed_port,
-    configured,
     expect_post,
     load_json,
     narrow,
@@ -159,150 +157,6 @@ def test_every_request_guideme_builds_matches_the_schema_and_is_keyed_q0_to_qn(
     assert Request.model_validate_json(request.model_dump_json(by_alias=True)) == request
 
 
-RETRIES = 1
-"""Retries each failing-status case allows, so an exhausted one is exactly two requests."""
-
-DETAIL = '{"detail":"questions.q0.criteria: must not be empty"}'
-"""A 422 body, which the error must carry verbatim and the span must not."""
-
-type Serve = Callable[[HTTPServer], Configure | None]
-"""How one failure case arranges the server, returning any builder change it needs."""
-
-type Check = Callable[[GuidemeError], None]
-"""What one failure case asserts about the raised error beyond its class and kind."""
-
-
-def _status(status: int, body: str = "", retry_after: str | None = None) -> Serve:
-    headers = None if retry_after is None else {"retry-after": retry_after}
-
-    def serve(httpserver: HTTPServer) -> Configure | None:
-        expect_post(httpserver).respond_with_data(body, status=status, headers=headers)
-
-    return serve
-
-
-def _refused(_httpserver: HTTPServer) -> Configure | None:
-    return lambda builder: builder.base_url(f"http://127.0.0.1:{closed_port()}")
-
-
-def _nothing_more(_error: GuidemeError) -> None:
-    """The class and the kind are the whole contract for this status."""
-
-
-def _carries_the_body(error: GuidemeError) -> None:
-    assert isinstance(error, InvalidError)
-    assert error.detail == DETAIL
-
-
-def _parsed_the_retry_after(error: GuidemeError) -> None:
-    assert isinstance(error, RateLimitedError)
-    assert error.retry_after == timedelta(seconds=0)
-
-
-@final
-@dataclass(frozen=True, slots=True)
-class Failure:
-    """One failing call: how the server behaves, and everything the caller must see."""
-
-    serve: Serve
-    expected: type[GuidemeError]
-    kind: str
-    served: int
-    check: Check
-
-
-FAILURES = [
-    Failure(_status(401), AuthError, "auth", 1, _nothing_more),
-    Failure(_status(422, body=DETAIL), InvalidError, "invalid", 1, _carries_the_body),
-    Failure(
-        _status(429, retry_after="0"),
-        RateLimitedError,
-        "rate_limited",
-        RETRIES + 1,
-        _parsed_the_retry_after,
-    ),
-    Failure(
-        _status(500, body="upstream exploded"),
-        UnexpectedStatusError,
-        "unexpected_status",
-        1,
-        _nothing_more,
-    ),
-    Failure(_status(529), OverloadedError, "overloaded", RETRIES + 1, _nothing_more),
-    Failure(_refused, TransportError, "transport", 0, _nothing_more),
-]
-
-
-@pytest.mark.parametrize("failure", FAILURES, ids=[case.kind for case in FAILURES])
-def test_every_failure_raises_its_typed_error_and_marks_the_ask_span(
-    httpserver: HTTPServer, runner: Runner, spans: Recorded, failure: Failure
-) -> None:
-    extra = failure.serve(httpserver)
-
-    def configure(builder: GuideBuilder) -> GuideBuilder:
-        settled = builder.max_retries(RETRIES)
-        return settled if extra is None else extra(settled)
-
-    with pytest.raises(failure.expected) as raised:
-        _ = runner.ask(noul("Urgent?"), TICKET, configure)
-    assert raised.value.kind == failure.kind
-    failure.check(raised.value)
-    assert len(httpserver.log) == failure.served
-    assert attributes(spans.one(ASK_SPAN))["error.type"] == failure.kind
-
-
-BACKOFF = timedelta(milliseconds=300)
-"""Long enough to measure that a retry really waited, short enough to pay for twice."""
-
-
-def test_a_429_is_retried_after_waiting_out_the_backoff(
-    httpserver: HTTPServer, runner: Runner
-) -> None:
-    httpserver.expect_oneshot_request(EVALUATE, method="POST").respond_with_data("", status=429)
-    expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
-    started = time.monotonic()
-    assert runner.ask(noul("Urgent?"), TICKET, lambda builder: builder.backoff(BACKOFF)) is True
-    assert time.monotonic() - started >= BACKOFF.total_seconds()
-    assert len(httpserver.log) == 2
-
-
-CONCURRENT = 2
-"""Asks issued at once, which must wait out their retries together rather than in turn."""
-
-ADVERTISED = 1.0
-"""Seconds the server puts in `retry-after`; whole seconds are all the header expresses."""
-
-MARGIN = 0.2
-"""Slack below the sequential time, so the assertion fails on serialisation, not on load."""
-
-
-async def _two_asks(base_url: str) -> list[object]:
-    guide = configured(base_url).build_async()
-    try:
-        entry = async_entry(guide)
-        return list(
-            await asyncio.gather(entry(noul("Urgent?"), TICKET), entry(noul("Urgent?"), TICKET))
-        )
-    finally:
-        await guide.close()
-
-
-def test_two_async_asks_wait_out_their_retries_at_the_same_time(httpserver: HTTPServer) -> None:
-    for _ in range(CONCURRENT):
-        httpserver.expect_oneshot_request(EVALUATE, method="POST").respond_with_data(
-            "", status=429, headers={"retry-after": "1"}
-        )
-    expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
-
-    started = time.monotonic()
-    assert asyncio.run(_two_asks(httpserver.url_for(""))) == [True, True]
-    elapsed = time.monotonic() - started
-
-    assert elapsed >= ADVERTISED
-    assert elapsed < CONCURRENT * ADVERTISED - MARGIN
-    assert len(httpserver.log) == 2 * CONCURRENT
-
-
 def _spent(input_tokens: int, output_tokens: int) -> str:
     """A reply whose single noul answer is fine and whose `usage` is what is under test."""
     return json.dumps(
@@ -312,6 +166,24 @@ def _spent(input_tokens: int, output_tokens: int) -> str:
             "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
         }
     )
+
+
+SECOND = timedelta(seconds=1)
+"""Any timeout at all: what these cases prove is the refusal, never the duration."""
+
+
+SPENT = (296, 20)
+"""The token counts `_spent` reports, and what a receipt must hand back unchanged."""
+
+
+def test_a_receipt_carries_the_model_and_the_usage_the_body_reported(
+    httpserver: HTTPServer, runner: Runner
+) -> None:
+    expect_post(httpserver).respond_with_data(_spent(*SPENT), content_type=JSON)
+    receipt = runner.receipt(noul("Urgent?"), TICKET)
+    assert receipt.answer is True
+    assert receipt.model == MODEL
+    assert (receipt.usage.input_tokens, receipt.usage.output_tokens) == SPENT
 
 
 VIOLATIONS = [noul_reply(1.5), _spent(-1, 20), _spent(296, -1)]
@@ -630,6 +502,38 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
     _ = GuideBuilder().api_key(ApiKey("k")).events(unknown)
 
 
+def _a_timeout_beside_a_transport(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = GuideBuilder().transport(httpx.MockTransport(answering_offline)).timeout(SECOND)
+
+
+def _a_transport_beside_a_timeout(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = GuideBuilder().timeout(SECOND).transport(httpx.MockTransport(answering_offline))
+
+
+def _an_async_transport_beside_a_timeout(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = GuideBuilder().timeout(SECOND).async_transport(httpx.MockTransport(answering_offline))
+
+
+def _both_transports(_monkeypatch: pytest.MonkeyPatch) -> None:
+    mock = httpx.MockTransport(answering_offline)
+    _ = GuideBuilder().transport(mock).async_transport(mock)
+
+
+def _both_transports_the_other_way_round(_monkeypatch: pytest.MonkeyPatch) -> None:
+    mock = httpx.MockTransport(answering_offline)
+    _ = GuideBuilder().async_transport(mock).transport(mock)
+
+
+def _an_async_transport_built_as_sync(_monkeypatch: pytest.MonkeyPatch) -> None:
+    builder = GuideBuilder().api_key(ApiKey("k"))
+    _ = builder.async_transport(httpx.MockTransport(answering_offline)).build()
+
+
+def _a_sync_transport_built_as_async(_monkeypatch: pytest.MonkeyPatch) -> None:
+    builder = GuideBuilder().api_key(ApiKey("k"))
+    _ = builder.transport(httpx.MockTransport(answering_offline)).build_async()
+
+
 @pytest.mark.parametrize(
     "build",
     [
@@ -650,6 +554,13 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         _events_both_without_the_logs_api,
         _events_log_with_a_drifted_log_record,
         _events_given_an_unknown_mode,
+        _a_timeout_beside_a_transport,
+        _a_transport_beside_a_timeout,
+        _an_async_transport_beside_a_timeout,
+        _both_transports,
+        _both_transports_the_other_way_round,
+        _an_async_transport_built_as_sync,
+        _a_sync_transport_built_as_async,
     ],
     ids=[
         "credentialed_base_url",
@@ -669,6 +580,13 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         "events_both_without_the_logs_api",
         "events_log_with_a_drifted_log_record",
         "events_given_an_unknown_mode",
+        "a_timeout_beside_a_transport",
+        "a_transport_beside_a_timeout",
+        "an_async_transport_beside_a_timeout",
+        "both_transports",
+        "both_transports_the_other_way_round",
+        "an_async_transport_built_as_sync",
+        "a_sync_transport_built_as_async",
     ],
 )
 def test_a_configuration_mistake_is_refused_before_a_guide_exists(
@@ -774,23 +692,6 @@ def test_the_request_carries_the_bearer_token_and_matches_the_schema(
     check_request(body)
     assert list(as_object(body["questions"])) == ["q0", "q1", "q2"]
     assert body["state"] == TICKET
-
-
-MODELS_BODY: Json = {
-    "models": [
-        {
-            "name": MODEL,
-            "description": "The current stable Jev.",
-            "release_date": "2026-02-11",
-        },
-        {
-            "name": "jev-1.12.0",
-            "description": "The Jev before it.",
-            "release_date": "2025-11-04",
-        },
-    ]
-}
-"""A `GET /v1/models` body, as the docs describe one."""
 
 
 def test_the_model_list_comes_back_as_values_under_its_own_span(

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "guideme"
-version = "0.1.1"
+version = "0.2.0"
 description = "Type-safe inline judgments from TypeSafe Jev: a yes/no is an if, a choice is an exhaustive match, a score is a comparison."
 readme = "README.md"
 requires-python = ">=3.12"

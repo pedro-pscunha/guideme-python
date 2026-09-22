@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Literal, final
 
 from opentelemetry.trace import Span, SpanKind, StatusCode, get_tracer
 
-from guideme.errors import GuidemeError
+from guideme.errors import GuidemeError, TransportError
 from guideme.policy import ChoiceOutcome, NoulOutcome, Outcome, ScoreOutcome, Thresholds
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ ANSWER_EVENT = "guideme.answer"
 """One per question answered."""
 
 RETRY_EVENT = "guideme.retry"
-"""One per throttled attempt, just before the wait. The warning of the Rust SDK."""
+"""One per attempt about to be resent, just before the wait. The warning of the Rust SDK."""
 
 type Events = Literal["span", "log", "both"]
 """Where an answer or a retry is written: the span, an OTLP log record, or both.
@@ -366,20 +366,35 @@ def fail_attempt(span: Span, error_type: str) -> None:
     span.set_status(StatusCode.ERROR)
 
 
-def retry_event(span: Span, status: int, attempt: int, delay: timedelta, events: Events) -> None:
+def retry_event(
+    span: Span, status: int | None, attempt: int, delay: timedelta, events: Events
+) -> None:
     """One `guideme.retry`. `attempt` is the ordinal of the resend about to be made.
+
+    `status` is the one a response arrived with, or `None` when the connection failed:
+    refused, reset, or a TLS handshake that did not complete. No timeout is resent, so no
+    timeout reaches here. Those two cases carry different attributes, and exactly one of
+    the two is on every event: a status, or `error.type` naming the transport. Neither is
+    ever absent and neither is ever a placeholder, because a dashboard grouping retries by
+    cause has to be able to tell a throttled API from an unreachable one.
 
     The log record is the `WARN` the Rust SDK logs; a span event carries no severity, so
     on the span its presence is the signal.
     """
     delay_ms = delay // _MILLISECOND
+    cause: dict[str, Attribute] = (
+        {"error.type": TransportError.kind}
+        if status is None
+        else {"http.response.status_code": status}
+    )
     attributes: dict[str, Attribute] = {
-        "http.response.status_code": status,
+        **cause,
         "guideme.retry.attempt": attempt,
         "guideme.retry.delay_ms": delay_ms,
     }
+    reached = "could not reach TypeSafe" if status is None else f"{status} from TypeSafe"
     if events != "log":
         span.add_event(RETRY_EVENT, attributes)
     logs = LOGS
     if events != "span" and logs is not None:
-        logs.retry(f"{status} from TypeSafe, retrying in {delay_ms} ms", attributes)
+        logs.retry(f"{reached}, retrying in {delay_ms} ms", attributes)

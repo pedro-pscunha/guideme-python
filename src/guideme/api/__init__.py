@@ -33,6 +33,36 @@ from guideme.policy import ScoreAnswer as JudgedScore
 from guideme.question import ChoiceSpec, NoulSpec, ScoreSpec, Spec
 from guideme.scalars import confidence, probability
 
+__all__ = [
+    "Answer",
+    "ChoiceAnswer",
+    "ChoiceQuestion",
+    "Count",
+    "ModelEntry",
+    "ModelsResponse",
+    "NoulAnswer",
+    "NoulCriteria",
+    "NoulQuestion",
+    "Question",
+    "Request",
+    "Response",
+    "ScoreAnswer",
+    "ScoreQuestion",
+    "Unit",
+    "Usage",
+    "answer_from_wire",
+    "question_to_wire",
+    "request_to_wire",
+    "validation_detail",
+]
+"""What this module owns.
+
+Everything here is declared below; nothing imported into it is re-exported. Without
+this list a `from guideme.api import *` would hand back `BaseModel`, `Field` and
+`Mapping` as though they were part of guideme's surface, and a reader looking for the
+wire would have to tell the mirror from what the mirror is built out of.
+"""
+
 
 class _Sent(BaseModel):
     """Base of everything guideme puts on the wire.

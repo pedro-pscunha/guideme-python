@@ -92,6 +92,31 @@ Each module survives the test.
   `asyncio.run` rather than adding a pytest plugin.
 - **Jitter comes from the standard library.** `random.SystemRandom`, so backoff needs no extra
   dependency and does not disturb a caller who seeded the global `random`.
+- **Only a failed connection is resent, and no timeout ever is.** `httpx.ConnectError` means
+  the request did not arrive, so nothing was judged and a resend repeats nothing. A
+  `RemoteProtocolError` and a body that will not decode mean it did arrive: the API may have
+  answered and billed it, and asking again would buy the same judgment twice. Idempotency is
+  the line, not whether the failure looks transient.
+  `httpx.ConnectTimeout` is the interesting exclusion, because idempotency alone would let it
+  through. It is excluded because the contract is shared and Rust cannot draw that line:
+  `reqwest` sets one deadline over the attempt, so a connect-phase timeout is `is_timeout()`
+  there and not `is_connect()`. An SDK that resent a failure the other could not even see
+  would be the two disagreeing about one incident. The second reason stands on its own: a
+  retried timeout multiplies the wall time `timeout(…)` is set to bound, and `httpx` already
+  spends that budget per phase, so the worst case is long enough without resending it.
+- **A transport is injectable and refuses a timeout beside it.** `transport(…)` gives a caller
+  a proxy, a client certificate or an `httpx.MockTransport`, which is what makes their own
+  control flow testable without a server. `httpx` hands a transport the client's timeout as a
+  request extension it may ignore — `MockTransport` does — so a timeout set beside one is a
+  promise nothing keeps. It is a `ConfigError` in either order rather than a silent override.
+- **`Receipt` has its own module, and declares its own `Usage`.** `_ask_overloads` names
+  `Receipt` in a return type and `guide` imports `_ask_overloads`, so it cannot live beside
+  `ModelInfo` in `guide` without a cycle. `guideme.receipt` imports nothing from the package,
+  which is what lets it sit that low: its `Usage` is a frozen dataclass of two `int`s, copied
+  out of `guideme.api.Usage` in `_receipt` the same way `_described` copies `ModelEntry` into
+  `ModelInfo`. The wire model keeps its name inside `guideme.api`. Exporting the pydantic one
+  would have saved a copy of two integers and put a dependency's whole surface — 28 attributes
+  that are not guideme's — on a published type, which is the thing `ModelInfo` exists to stop.
 - **Telemetry speaks OpenTelemetry.** The ask span uses the GenAI conventions, each HTTP
   attempt is its own client span with the HTTP conventions, and a failure is `error.type` plus
   an error span status rather than an error-level record. Anything without a convention is
@@ -192,17 +217,47 @@ Each module survives the test.
   name the internal `Client` and the private `_Config`, because Python has no private
   constructor, not because either is supported. Build one through `Guide.builder()` or
   `Guide.from_env()`; those are what validate the policy and the origin before a socket opens.
-- **`with_policy` shares the pool.** The copy holds the same client, so `close()` on either the
-  original or the copy closes the connection pool for both.
-- **`Question` is supported, and not in `__all__`.** The top-level surface is a fixed list and
-  a question's type is whatever its constructor returns, so callers annotate by inference.
-  `guideme.question.Question` is in the second tier, beside `guideme.api` and
-  `guideme.policy`, and carries the same promise: import it from there when you need to write
-  the type of a stored question down. The promise is that one name. The rest of the module,
-  `validate`, `Spec` and the concrete question classes, is private, because naming the whole
-  module would publish all of it to let a caller annotate one thing.
-- **Two `Question`s.** `guideme.question.Question` is the user-facing value;
-  `guideme.api`'s question model is the wire shape it becomes.
+- **`with_policy` shares the pool, and the pool is counted.** The copy holds the same client
+  over the same `httpx` client, and a private `_Pool` counts its holders. Each guide releases
+  once and the transport closes when the last one does, so closing a derived guide leaves its
+  parent able to ask. Rust needs none of this: `Arc<Inner>` drops when the last clone does.
+  Until 0.2.0 the count did not exist and `close()` on either guide closed both, which was
+  survivable as a documented sharp edge and would have been a trap the moment `with` existed.
+  The count alone is not enough, and the second half is that `share()` hands back a *new*
+  client over the same pool, each carrying its own release-once flag. Returning `self` would
+  give both guides one flag between them, so closing the first guide twice would spend the
+  second guide's hold and shut the pool under it — the count cannot tell which holder a
+  release came from. With a flag per client, closing one guide twice releases once. Sharing
+  from an already-closed client is refused rather than copied: it would hand back a client
+  holding nothing over a pool that may already be shut, and that only surfaces on the first
+  ask. The clamp at zero inside `drop` is the last line of defence, not the mechanism.
+  All of it — the count and every holder's flag — sits under one `threading.Lock` on the
+  pool, because `Guide` tells you to share a guide across threads and a flag read, a flag
+  flip and a decrement are three steps that must not interleave. The lock is taken when a
+  guide is derived and when one is closed, never per request: `ask` reads the `httpx` client
+  and nothing else. `httpx`'s own close happens after the lock is released, and no `await`
+  is ever reached while it is held, so the asyncio pool uses the same plain lock.
+  A patch that cannot settle is settled **before** the hold is taken. Building the derived
+  guide in one expression took the hold first, because Python evaluates arguments left to
+  right, and a bad patch then raised with nothing left to release it.
+- **Some names mean two things, and the pairs are not renamed.** `Question`,
+  `NoulQuestion`, `ChoiceQuestion` and `ScoreQuestion` each name a user-facing value in
+  `guideme.question`, re-exported from `guideme`, and a pydantic wire model in `guideme.api`.
+  The first is what a caller builds and annotates; the second is the shape it becomes on the
+  way out. They never meet — nothing takes one where the other belongs, the wire models are
+  built only inside `question_to_wire`, and the import graph is one-way — so the collision
+  costs a reader one moment of "which one is this" that the import line answers, and renaming
+  either side would cost more. The wire names have to mirror the API's `type` tags, and the
+  user-facing ones are what a caller writes; a third spelling of either would be the one that
+  had to be explained. `guideme.api.NoulCriteria` and `guideme.question.NoulCriteria` are a
+  fifth such pair, for the same reason, and `api`'s module docstring already says so.
+  `Usage` is the pair 0.2.0 added and the only one where **both** halves sit in a published
+  `__all__`: `guideme.Usage` is the frozen dataclass a receipt carries and `guideme.api.Usage`
+  is the pydantic model the response is parsed into, and `_receipt` copies one into the other.
+  That is the cost of the decision above — not exporting the wire model is what creates a
+  second `Usage` — and it is the right way round: a caller reaching the top-level surface gets
+  the value object, and the name they would otherwise collide with is in a module they only
+  import when they are building requests by hand.
 - **State is JSON-shaped.** Anything `json.dumps` accepts without a default hook. A dataclass
   goes through `dataclasses.asdict`, a pydantic model through `.model_dump()`. This is the one
   untyped value in the package, and it is serialised at the boundary.

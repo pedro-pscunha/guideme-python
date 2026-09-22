@@ -8,6 +8,22 @@ metrics by it; it is low-cardinality and stable.
 from datetime import timedelta
 from typing import ClassVar, Literal, final, override
 
+__all__ = [
+    "AuthError",
+    "ConfigError",
+    "ErrorKind",
+    "GuidemeError",
+    "InvalidError",
+    "OverloadedError",
+    "ProtocolError",
+    "RateLimitedError",
+    "TransportError",
+    "UnexpectedStatusError",
+    "UnsureError",
+]
+"""The whole tree, all of it re-exported from `guideme` itself except `ErrorKind`,
+which is the type of `kind` rather than something a caller catches."""
+
 type ErrorKind = Literal[
     "auth",
     "invalid",
@@ -78,13 +94,18 @@ class RateLimitedError(GuidemeError):
 
 @final
 class OverloadedError(GuidemeError):
-    """`529` after every retry."""
+    """`529` after every retry, or a `retry-after` longer than the cap."""
 
     kind = "overloaded"
 
-    def __init__(self) -> None:
-        """Build the error; the API sends no detail with a 529."""
-        super().__init__("TypeSafe is overloaded")
+    def __init__(self, retry_after: timedelta | None) -> None:
+        """Build the error around the last `retry-after` the API sent, if any.
+
+        A `529` carries the header as often as a `429` does, so it is kept here for the
+        same reason: it is the only thing that says when a caller may come back.
+        """
+        super().__init__(f"TypeSafe is overloaded (retry-after: {retry_after})")
+        self.retry_after = retry_after
 
 
 @final
