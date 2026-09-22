@@ -56,9 +56,34 @@ text; `examples` and `counterexamples`, the two clauses in declaration order; an
 the exact bytes the algorithm above must produce. The `noul` cases come from the runtime
 renderer rather than a derive, so they are the vector's only cover for that path.
 
-Items are inserted **verbatim**. Nothing is escaped: an item containing `"; "` or a newline is
-placed in the clause exactly as written, and the rendering is not required to be reversible —
-no SDK parses a rendered rubric back into its parts, and none should be written to.
+Items are inserted **verbatim**. Nothing is escaped, and the rendering is not required to be
+reversible — no SDK parses a rendered rubric back into its parts, and none should be written
+to. Rubric text is trusted: an SDK does not sanitise it, and it is the caller's to get right.
+
+What the rules below do guarantee is narrower and worth stating exactly: **a string an SDK
+renders from declared parts carries exactly the clauses those parts declared.** That is
+rendering integrity, not input trust.
+
+### Validation is over the declared items, not the rendered text
+
+One sentence that decides every case a third implementer will hit, and the reason none of them
+needs a special rule:
+
+- `["a; b"]` renders identically to `["a", "b"]`, and is still **one** item. It passes the
+  duplicate and shared-example checks that two items would meet.
+- `" a"` and `"a"` are two items, because they are two strings.
+- `"A"` and `"a"` are two items, for the same reason. There is no case folding.
+
+An implementation that normalised, trimmed or split before comparing would refuse declarations
+these SDKs accept. Compare the strings the caller declared, and nothing else.
+
+`"; "` inside an item is therefore legal, and a newline is not — which looks inconsistent until
+you see what each one does. `"; "` changes how many examples a reader sees, and
+`"card declined; retry failed"` is ordinary prose a caller is entitled to write. A newline
+changes **which clause** a reader thinks an item is in, which forges a clause the rubric never
+declared. Only the second breaks the guarantee above. An item reading
+`"Not this option: x"` with no newline in it is the same class as `"; "`: legal, because
+without a line break it cannot become a clause.
 
 ### Which declarations are legal
 
@@ -79,6 +104,21 @@ ask time.
 - Examples are **attached to a blank rubric** is refused; a blank rubric with no examples is
   not. See below.
 - A counterexample on a **level** is refused: an ordered scale has no "not this option".
+- An item containing `U+000A` or `U+000D` is refused. `U+000A` is what the renderer joins
+  clauses with, so an item carrying one would read as a clause that was never declared;
+  `U+000D` is refused as hygiene, being pasted-text residue that breaks the `"; "`-joined line.
+  The rule applies to **items only**. A newline in `what` stays legal: a bare `what` has to
+  remain legal whatever it contains, so refusing it in the clause-bearing case would stop a
+  caller writing ordinary multi-line prose without closing any path.
+
+  The test is the literal codepoint — `"\n" in item` in Python, `item.contains('\n')` in Rust.
+  Never `str.splitlines()`, never `str::lines()`, never an `is_control` predicate. Python's
+  `splitlines()` splits on eight codepoints, adding `U+000B`, `U+000C`, `U+001C`, `U+001D`,
+  `U+001E`, `U+0085`, `U+2028` and `U+2029`; Rust's `lines()` splits on `U+000A` alone. An
+  implementer reaching for the idiomatic call in either language writes a rule the other does
+  not have, and neither version looks wrong read on its own. `U+2028`, `U+2029` and `U+0085`
+  are deliberately **not** refused: they are `White_Space`, so an item made only of them is
+  already refused as empty, and embedded they cannot produce a clause boundary.
 
 ### What counts as blank, and what counts as a duplicate
 
