@@ -348,7 +348,7 @@ Pass a transport and your control flow is testable with no server, no port and n
 
 ```python
 import httpx
-from guideme import ApiKey, Guide, GuideBuilder, noul
+from guideme import ApiKey, Guide, noul
 
 
 def answer(_request: httpx.Request) -> httpx.Response:
@@ -363,7 +363,7 @@ def answer(_request: httpx.Request) -> httpx.Response:
 
 
 def test_an_urgent_ticket_is_prioritised() -> None:
-    builder = GuideBuilder().api_key(ApiKey("not-a-real-key"))
+    builder = Guide.builder().api_key(ApiKey("not-a-real-key"))
     with builder.transport(httpx.MockTransport(answer)).build() as guide:
         assert guide.ask(noul("Is this urgent?"), "payouts failing") is True
 ```
@@ -403,7 +403,7 @@ One span named `guideme.ask` per request, shaped by the OpenTelemetry GenAI conv
 `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.*`, and on failure `error.type`
 with an error status. Under it, one HTTP client span per attempt with
 `http.response.status_code`, so a retry is visible as sibling spans, plus a `guideme.retry`
-event when an attempt is throttled. One `guideme.answer` event per question with the outcome,
+event when an attempt is resent. One `guideme.answer` event per question with the outcome,
 the probability or confidence, the unsure verdict and the settled thresholds that produced it.
 The state is never recorded unless you opt in with `record_state(True)`. The API key never
 appears anywhere.
@@ -474,6 +474,10 @@ Anything else in the package is private, whatever its name looks like.
   reach for them when you need to annotate a question you are storing or passing on: a `dict`
   is invariant, so a `dict[str, NoulQuestion]` is not a `dict[str, Question[bool]]` and the
   annotation has to be written. Everything else in `guideme.question` is private.
+  `guideme.api` declares its own `Question`, `NoulQuestion`, `ChoiceQuestion` and
+  `ScoreQuestion`: same names, different classes. Those are the wire shapes the ones above
+  become on the way out, and you only meet them if you build requests by hand. The import
+  line says which you have.
 - The scalars are validated once and never re-checked: `Probability` and `Confidence` hold the
   unit-interval numbers on `Verdict`, `Ranked` and `Scored`, `Key` and `Rank` are what a runtime
   rubric answers with, `Model` names the model to ask, and `ApiKey` carries the key without ever

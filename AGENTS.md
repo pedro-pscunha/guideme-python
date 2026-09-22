@@ -48,27 +48,28 @@ two pages: `https://docs.typesafe.ai/api.md` covers `POST /v1/systemone` and
 | `src/guideme/enums.py` | `Choice`, `Levels`, `option`, `level`, `fallback`, and the internals `render` and the `require_*` checks | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there. `render` is the one place a rubric's examples become wire text, and its output is a cross-SDK contract item. `render`, `require_unshared_examples`, `require_no_counterexamples` and `require_no_fallback` are internal despite their names: they are imported by `question.py` and are in no tier, like `question.validate` |
 | `src/guideme/question.py` | question kinds, constructors, `Ranked`, `Scored`, the unsure ladder | a question is inert until asked; the reader travels with it |
 | `src/guideme/ask.py` | shapes: `encode`, `decode`, `Plan` | ids are `q0..qN` in encounter order, insertion order for a dict |
-| `src/guideme/receipt.py` | `Receipt` | its own module because the generated `ask` surfaces name it in a return type, so it has to sit below them |
+| `src/guideme/receipt.py` | `Receipt` and the value-object `Usage` | its own module because the generated `ask` surfaces name `Receipt` in a return type, so it has to sit below them; it imports nothing from the package |
 | `src/guideme/_ask_overloads.py` | the typed `ask` and `ask_with_receipt` surfaces | GENERATED; edit `scripts/gen_ask_overloads.py` and run `mise run gen` |
 | `src/guideme/telemetry.py` | every span, event, log record and attribute | the names are the contract, documented in `docs/observability.md`; installs no provider |
 | `src/guideme/api/__init__.py` | the wire mirror and the adapters to the core | mirrors `spec/schema/*.json` field for field; no policy here |
 | `src/guideme/api/client.py` | HTTP, retries, statuses to errors, one span per attempt | the only importer of `httpx`; every decision it makes is made by the pure `step` |
 | `src/guideme/guide.py` | `Guide`, `AsyncGuide`, `GuideBuilder`, `ModelInfo` | the two executors share `_prepare` and `_finish`; what is written twice is the two `await`s |
-
-`ModelInfo` copies the wire's `ModelEntry` into a plain value object so that `models()` never
-makes a caller name a pydantic type. `Receipt.usage` deliberately does **not** do that: it
-carries `guideme.api.Usage` itself. Two non-negative integers fixed by
-`spec/schema/response.json` do not earn a second name, `guideme.api` is a published tier
-already, and the cross-SDK parity table names the exported type `Usage`. The precedent is
-recorded here because the two cases look alike and the difference is a decision, not drift.
 | `spec/` | the vendored schemas and golden vectors | read-only here; it is `guideme-rust`'s output, and `mise run spec-check` proves this copy matches |
+
+**No pydantic type reaches the top-level surface.** `ModelInfo` copies the wire's
+`ModelEntry` and `receipt.Usage` copies the wire's `api.Usage`, so what `models()` and
+`ask_with_receipt` hand back is this package's own value object in both cases. The wire
+models keep their names inside `guideme.api`, where naming pydantic is the point. A type on
+the published surface must not carry a dependency's methods or change shape when that
+dependency has a major release, and "it is only two integers" is not an exception to that —
+it is how the first one would get in.
 
 Modules keep a one-way import graph, which `pyright`'s `reportImportCycles` enforces:
 `errors` imports nothing from the package; `_json` and `scalars` import `errors`; `policy`
 imports `errors` and `scalars`; `enums` imports `errors` and `policy`; `question` imports the
 above; `ask` imports `question`; `telemetry` imports `errors` and `policy`; `api` imports
-`question` and below; `receipt` imports `api`; `_ask_overloads` imports `_json`, `question`
-and `receipt`; `api.client` imports `api` and `telemetry`. `receipt` sits where it does
+`question` and below; `receipt` imports nothing from the package; `_ask_overloads` imports
+`_json`, `question` and `receipt`; `api.client` imports `api` and `telemetry`. `receipt` sits where it does
 because `_ask_overloads` names `Receipt` in a return type and `guide` imports
 `_ask_overloads`, so the type cannot live in `guide`.
 Nothing inside the package writes `from guideme import ...`: that would

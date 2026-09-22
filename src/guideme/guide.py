@@ -38,7 +38,7 @@ from guideme.api.client import (
 from guideme.ask import Claim, Plan, decode, encode
 from guideme.errors import ConfigError, GuidemeError, ProtocolError
 from guideme.policy import Outcome, Policy, Thresholds, resolve
-from guideme.receipt import Receipt
+from guideme.receipt import Receipt, Usage
 from guideme.scalars import ApiKey, Model
 from guideme.telemetry import (
     EVENT_MODES,
@@ -59,6 +59,15 @@ BASE_URL_VAR = "TYPESAFE_BASE_URL"
 
 MODEL_VAR = "GUIDEME_MODEL"
 """Optional model override for `from_env`."""
+
+_BOTH_TRANSPORTS = (
+    "transport and async_transport cannot both be set; a builder carrying both can build "
+    "neither kind of guide, so the second one is refused where it is written"
+)
+"""Why only one transport may be set. One builder produces one guide, and `build()` refuses
+an async transport while `build_async()` refuses a sync one, so a builder holding both is
+already unbuildable; saying so at the setter beats two build errors that each name the
+other setter."""
 
 DEFAULT_TIMEOUT = timedelta(seconds=30)
 """How long one phase of one attempt may take.
@@ -176,8 +185,16 @@ def _finish(span: Span, prepared: _Prepared, response: Response, events: Events)
 
 
 def _receipt(answer: object, response: Response) -> Receipt[object]:
-    """Put one answered shape beside what the response said it cost and what produced it."""
-    return Receipt(answer=answer, model=response.model, usage=response.usage)
+    """Put one answered shape beside what the response said it cost and what produced it.
+
+    The two counts are copied out of the wire model rather than handed over inside it,
+    so what a caller holds is this package's own value object. `_described` does the same
+    for `models()`, and for the same reason.
+    """
+    usage = Usage(
+        input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens
+    )
+    return Receipt(answer=answer, model=response.model, usage=usage)
 
 
 def _merged(config: _Config, policy: Policy) -> _Config:
@@ -234,7 +251,11 @@ class Guide(SyncAskOverloads):
 
         The connection pool is shared and counted: the guide returned here is a second
         holder of it, so closing either one leaves the other able to ask and the pool
-        closes when the last of them does. Close each guide once.
+        closes when the last of them does. Each guide holds and releases on its own, so
+        closing one of them twice releases once and never touches the other's hold.
+
+        Raises:
+            ConfigError: this guide has already been closed, so there is no hold to share.
         """
         return Guide(self._client.share(), _merged(self._config, policy))
 
@@ -321,7 +342,11 @@ class AsyncGuide(AsyncAskOverloads):
 
         The connection pool is shared and counted: the guide returned here is a second
         holder of it, so closing either one leaves the other able to ask and the pool
-        closes when the last of them does. Close each guide once.
+        closes when the last of them does. Each guide holds and releases on its own, so
+        closing one of them twice releases once and never touches the other's hold.
+
+        Raises:
+            ConfigError: this guide has already been closed, so there is no hold to share.
         """
         return AsyncGuide(self._client.share(), _merged(self._config, policy))
 
@@ -518,9 +543,11 @@ class GuideBuilder:
         written out. It is used by `build()`; `build_async()` needs `async_transport`.
 
         Raises:
-            ConfigError: `timeout(...)` is already set. See `timeout` for why.
+            ConfigError: `timeout(...)` or `async_transport(...)` is already set.
         """
         self._refuse_a_timeout("transport")
+        if self._async_transport is not None:
+            raise ConfigError(_BOTH_TRANSPORTS)
         self._transport = transport
         return self
 
@@ -531,9 +558,11 @@ class GuideBuilder:
         is both kinds at once, so one of those can be given to either setter.
 
         Raises:
-            ConfigError: `timeout(...)` is already set. See `timeout` for why.
+            ConfigError: `timeout(...)` or `transport(...)` is already set.
         """
         self._refuse_a_timeout("async_transport")
+        if self._transport is not None:
+            raise ConfigError(_BOTH_TRANSPORTS)
         self._async_transport = transport
         return self
 

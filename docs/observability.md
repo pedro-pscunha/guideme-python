@@ -142,13 +142,13 @@ cannot have: a severity, a message, and an identity of its own.
 | severity text, number | `INFO`, 9 | `WARN`, 13 |
 | body | `q0 noul: yes`, `q1 choice: billing`, `q2 score: level 1` | `429 from TypeSafe, retrying in 1000 ms`, or `could not reach TypeSafe, retrying in 500 ms` |
 | attributes | the `guideme.answer` table above, unchanged | the `guideme.retry` table above, unchanged |
-| trace id, span id | the `guideme.ask` span's | the throttled attempt span's |
+| trace id, span id | the `guideme.ask` span's | the resent attempt span's |
 
 The bodies are the messages the Rust SDK writes, so one saved query reads both SDKs.
 
 Correlation needs no configuration. A record resolves the active OpenTelemetry context
 when it is built, and guideme builds it inside the span the event belongs to, so an answer
-points at its ask span and a retry at the attempt that was throttled. Nothing has to be
+points at its ask span and a retry at the attempt being resent. Nothing has to be
 passed through, and there is nothing to get wrong.
 
 #### Choosing a signal

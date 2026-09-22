@@ -284,6 +284,18 @@ def client_vars(guide: Guide | AsyncGuide) -> str:
     return repr(vars(inner))
 
 
+def pool_holders(guide: Guide | AsyncGuide) -> int:
+    """Holds left on a guide's connection pool.
+
+    Private state, read on purpose: "the pool was closed exactly once" is a statement
+    about the count, and a guide that leaks one looks identical from the outside to a
+    guide that released it.
+    """
+    # pylint: disable=protected-access  # the lifecycle proof reads what is private on purpose
+    client = guide._client  # noqa: SLF001 # pyright: ignore[reportPrivateUsage] -- lifecycle proof
+    return client._pool.holders  # noqa: SLF001 # pyright: ignore[reportPrivateUsage] -- same
+
+
 def configured(base_url: str, configure: Configure | None = None) -> GuideBuilder:
     """The builder every local-server test starts from: the test key, that origin, 10 ms backoff."""
     builder = (
@@ -386,25 +398,42 @@ class Runner:
         async with self._builder(None).build_async() as guide:
             return await _async_receipt_entry(guide)(shape, state)
 
-    def paired(self, shape: object, state: Json) -> list[object]:
-        """Ask through a derived guide, then through the guide it was derived from.
+    def paired(self, shape: object, state: Json, closes: int) -> tuple[list[object], int]:
+        """Three asks across a guide and one derived from it, closing the derived one.
 
-        Both guides are entered as context managers and the derived one leaves its block
-        first, so the second ask happens only if closing a derived guide left the pool
-        the two of them share open.
+        Both are entered as context managers, so the derived guide is closed `closes`
+        times in all: `closes - 1` by hand inside its block, and once more by leaving it.
+        The parent only ever releases at the very end, so all three asks must answer, and
+        that is the whole invariant. One close of the derived guide must not take the
+        parent's hold, and neither must a second: a guide closed twice releases once.
+
+        Returns the three answers and the holds left on the pool once both guides have
+        left their blocks, which must be zero. Without that count a guide that leaked a
+        hold would pass: the asks all answer either way, and the difference between
+        releasing once and never releasing at all is only visible here.
         """
         if self.kind == SYNC:
             with self._builder(None).build() as guide:
                 with guide.with_policy(Policy()) as derived:
                     first = _entry(derived)(shape, state)
-                return [first, _entry(guide)(shape, state)]
-        return asyncio.run(self._paired_async(shape, state))
+                    for _ in range(closes - 1):
+                        derived.close()
+                    second = _entry(guide)(shape, state)
+                answers = [first, second, _entry(guide)(shape, state)]
+            return (answers, pool_holders(guide))
+        return asyncio.run(self._paired_async(shape, state, closes))
 
-    async def _paired_async(self, shape: object, state: Json) -> list[object]:
+    async def _paired_async(
+        self, shape: object, state: Json, closes: int
+    ) -> tuple[list[object], int]:
         async with self._builder(None).build_async() as guide:
             async with guide.with_policy(Policy()) as derived:
                 first = await async_entry(derived)(shape, state)
-            return [first, await async_entry(guide)(shape, state)]
+                for _ in range(closes - 1):
+                    await derived.close()
+                second = await async_entry(guide)(shape, state)
+            answers = [first, second, await async_entry(guide)(shape, state)]
+        return (answers, pool_holders(guide))
 
     def models(self, configure: Configure | None = None) -> tuple[ModelInfo, ...]:
         """`GET /v1/models` through this kind's executor."""

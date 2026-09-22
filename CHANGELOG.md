@@ -22,7 +22,9 @@ Everything else is additive.
 - `ask_with_receipt` on `Guide` and `AsyncGuide`, with the same overload family as `ask`. It
   returns `Receipt[T]` — `answer`, `model`, `usage` — so cost attribution and pinning a policy
   to the model version that produced its numbers no longer need an OpenTelemetry pipeline.
-  `ask` is that call followed by `.answer`. `Receipt` and `Usage` are exported from `guideme`.
+  `ask` is that call followed by `.answer`. `Receipt` and `Usage` are exported from `guideme`,
+  and `Usage` is a frozen dataclass of two `int`s copied out of the wire model, so no
+  pydantic type reaches the top-level surface — the trade `ModelInfo` already makes.
 - `with` and `async with` on the two guides, each closing the guide on the way out. The pool a
   guide holds is now counted: `with_policy(…)` takes a second hold on it, and closing either
   guide leaves the other able to ask. Before this, closing a derived guide closed its parent's
@@ -32,7 +34,8 @@ Everything else is additive.
   answers a test with no server, no port and no key — the README's new **Testing your code**
   section is that test written out. A transport and `timeout(…)` refuse each other in either
   order, because a custom transport is free to ignore the budget `httpx` hands it and a
-  silent no-op is worse than a `ConfigError`; so does building the wrong kind of guide from one.
+  silent no-op is worse than a `ConfigError`; so does building the wrong kind of guide from
+  one, and so does setting both transports on one builder, which could build neither.
 - `GET /v1/models` is retried on `429` and `529`, through the same loop and the same spans an
   ask uses. The API's docs say an SDK handles a `429` for you, and a `429` during startup used
   to fail the start.
@@ -51,7 +54,20 @@ Everything else is additive.
   back `BaseModel`, `Field` and `Mapping`; `guideme.question`, `guideme.policy`,
   `guideme.enums` and `guideme.errors` each gained one too.
 
+### Fixed
+
+- Closing one guide twice no longer closes the connection pool under a guide derived from it
+  with `with_policy(…)`. `share()` now hands back a distinct client over the shared pool, each
+  carrying its own release-once flag, so a guide releases exactly once however many times it
+  is closed; a count alone cannot tell which holder a release came from. Sharing from an
+  already-closed guide is a `ConfigError` rather than a guide holding nothing.
+
 ### Changed
+
+- `guideme.ask` walks a shape through four `TypeGuard` predicates instead of four `cast()`
+  calls. There are now no casts anywhere in `src/guideme`: a `TypeGuard` replaces the narrowed
+  type outright where an annotated assignment only intersects with it, so the element types
+  are `object` rather than unknown and a checker verifies what was being asserted before.
 
 - `guideme.retry` carries `error.type = "transport"` and **no** `http.response.status_code`
   when the attempt it is resending never got a response. Exactly one of the two is on every

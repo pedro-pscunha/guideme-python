@@ -3,7 +3,8 @@
 Retries `429` and `529` with exponential backoff, honouring `retry-after`, and maps
 every status to a typed error. Each attempt is one span shaped by the OpenTelemetry
 HTTP client conventions, so a retried request is sibling spans under the ask span,
-each with its own status code, and a throttled one also carries a retry event.
+each with its own status code, and one that is about to be resent also carries a retry
+event.
 
 `Client` and `AsyncClient` are the same flow twice. Everything either of them decides
 is decided by `step`, which is pure; what is written out twice is the `await` and the
@@ -13,6 +14,7 @@ sleep.
 import asyncio
 import time
 from collections.abc import Callable
+from copy import copy
 from dataclasses import dataclass
 from datetime import timedelta
 from random import SystemRandom
@@ -122,7 +124,7 @@ class Endpoint:
 @final
 @dataclass(frozen=True, slots=True)
 class RetryPolicy:
-    """How often to resend a throttled request, and how long to wait first."""
+    """How often to resend a request that failed, and how long to wait first."""
 
     max_retries: int = 3
     backoff: timedelta = timedelta(milliseconds=500)
@@ -149,26 +151,33 @@ class RetryPolicy:
 @final
 @dataclass(slots=True)
 class _Pool[T]:
-    """One `httpx` client and the number of guides holding it.
+    """One `httpx` client and the number of clients holding it.
 
     A guide derived with `with_policy` shares the pool its parent opened, and Python has
     no `Arc` to count that for us. So the count is explicit: every holder releases once,
     and the transport closes when the last one does. Closing a derived guide therefore
     leaves its parent able to ask, which is what makes `with` safe on both.
 
-    A holder that releases twice is the caller closing one guide twice. The count stops
-    at zero rather than going negative, so the second close does nothing at all.
+    The count alone is not enough, and `Client.close` is where the rest of it lives: a
+    holder that is closed twice must release once. Each `share()` hands back a distinct
+    client carrying its own flag for that, so no count kept here can be spent by the
+    wrong holder. The clamp below is the last line of defence rather than the mechanism.
     """
 
     http: T
     holders: int = 1
 
     def acquire(self) -> None:
-        """Take a second hold on the pool, for a guide derived from the one holding it."""
+        """Take one more hold on the pool, for a client derived from one already holding it."""
         self.holders += 1
 
     def release(self) -> bool:
-        """Drop one hold. True when this was the last, so the transport must be closed."""
+        """Drop one hold. True when this was the last, so the transport must be closed.
+
+        Every caller is a `Client.close` that has just flipped its own hold to spent, so
+        in practice the count never reaches here already at zero. It is clamped anyway:
+        returning `True` off a negative count would close a live transport.
+        """
         if not self.holders:
             return False
         self.holders -= 1
@@ -371,11 +380,30 @@ class Client:
                 timeout=timeout.total_seconds(), follow_redirects=True, transport=transport
             )
         )
+        self._holding = True
 
-    def share(self) -> Self:
-        """Take a second hold on the connection pool, for a guide derived from this one's."""
+    def share(self) -> "Client":
+        """A second client over this one's pool, for a guide derived from this one's.
+
+        A distinct object rather than `self`, because the hold is what has to be released
+        exactly once and `self` cannot carry two of them. Two guides over one returned
+        `self` would share one flag, so closing the first guide twice would spend the
+        second guide's hold and shut the pool under it.
+
+        Everything else is shared: the same pool, key, endpoint, retry policy and event
+        routing, so the copy costs nothing and no setting can drift between the two. The
+        copy carries this client's own flag, which is why a closed one is refused rather
+        than copied: sharing from it would hand back a client holding nothing, over a
+        pool that may already be shut, and the mistake would only surface on the first ask.
+
+        Raises:
+            ConfigError: this client has already been closed.
+        """
+        if not self._holding:
+            detail = "cannot share a closed client"
+            raise ConfigError(detail)
         self._pool.acquire()
-        return self
+        return copy(self)
 
     def evaluate(self, request: Request) -> Response:
         """`POST /v1/systemone`, resent while the API throttles or a connection fails."""
@@ -437,7 +465,15 @@ class Client:
         return self._pool.http.post(url, content=body, headers=_sending(self._api_key))
 
     def close(self) -> None:
-        """Release this hold on the connection pool, closing it when it was the last."""
+        """Release this client's hold on the pool, closing it when this was the last hold.
+
+        Idempotent: a client closed twice releases once. The flag is per client, so a
+        second close here can never spend a hold that belongs to a client `share()`
+        handed out.
+        """
+        if not self._holding:
+            return
+        self._holding = False
         if self._pool.release():
             self._pool.http.close()
 
@@ -474,11 +510,19 @@ class AsyncClient:
                 timeout=timeout.total_seconds(), follow_redirects=True, transport=transport
             )
         )
+        self._holding = True
 
-    def share(self) -> Self:
-        """Take a second hold on the connection pool, for a guide derived from this one's."""
+    def share(self) -> "AsyncClient":
+        """A second client over this one's pool. `Client.share` says why it is a new object.
+
+        Raises:
+            ConfigError: this client has already been closed.
+        """
+        if not self._holding:
+            detail = "cannot share a closed client"
+            raise ConfigError(detail)
         self._pool.acquire()
-        return self
+        return copy(self)
 
     async def evaluate(self, request: Request) -> Response:
         """`POST /v1/systemone`, resent while the API throttles or a connection fails."""
@@ -535,6 +579,9 @@ class AsyncClient:
         return await self._pool.http.post(url, content=body, headers=_sending(self._api_key))
 
     async def close(self) -> None:
-        """Release this hold on the connection pool, closing it when it was the last."""
+        """Release this client's hold on the pool. `Client.close` says why it is idempotent."""
+        if not self._holding:
+            return
+        self._holding = False
         if self._pool.release():
             await self._pool.http.aclose()

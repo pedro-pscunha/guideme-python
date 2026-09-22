@@ -109,12 +109,14 @@ Each module survives the test.
   control flow testable without a server. `httpx` hands a transport the client's timeout as a
   request extension it may ignore — `MockTransport` does — so a timeout set beside one is a
   promise nothing keeps. It is a `ConfigError` in either order rather than a silent override.
-- **`Receipt` has its own module.** `_ask_overloads` names it in a return type and `guide`
-  imports `_ask_overloads`, so it cannot live beside `ModelInfo` in `guide` without a cycle.
-  `guideme.receipt` sits above `guideme.api`, which is where `Usage` is declared, and that
-  `Usage` is exported as-is rather than copied into a plain value object the way `ModelInfo`
-  copies `ModelEntry`: two integers with no behaviour do not earn a second name, and
-  `guideme.api` is a published tier already.
+- **`Receipt` has its own module, and declares its own `Usage`.** `_ask_overloads` names
+  `Receipt` in a return type and `guide` imports `_ask_overloads`, so it cannot live beside
+  `ModelInfo` in `guide` without a cycle. `guideme.receipt` imports nothing from the package,
+  which is what lets it sit that low: its `Usage` is a frozen dataclass of two `int`s, copied
+  out of `guideme.api.Usage` in `_receipt` the same way `_described` copies `ModelEntry` into
+  `ModelInfo`. The wire model keeps its name inside `guideme.api`. Exporting the pydantic one
+  would have saved a copy of two integers and put a dependency's whole surface — 28 attributes
+  that are not guideme's — on a published type, which is the thing `ModelInfo` exists to stop.
 - **Telemetry speaks OpenTelemetry.** The ask span uses the GenAI conventions, each HTTP
   attempt is its own client span with the HTTP conventions, and a failure is `error.type` plus
   an error span status rather than an error-level record. Anything without a convention is
@@ -221,10 +223,25 @@ Each module survives the test.
   parent able to ask. Rust needs none of this: `Arc<Inner>` drops when the last clone does.
   Until 0.2.0 the count did not exist and `close()` on either guide closed both, which was
   survivable as a documented sharp edge and would have been a trap the moment `with` existed.
-  A guide closed twice is the caller's mistake; the count stops at zero rather than going
-  negative, so the second close does nothing.
-- **Two `Question`s.** `guideme.question.Question` is the user-facing value;
-  `guideme.api`'s question model is the wire shape it becomes.
+  The count alone is not enough, and the second half is that `share()` hands back a *new*
+  client over the same pool, each carrying its own release-once flag. Returning `self` would
+  give both guides one flag between them, so closing the first guide twice would spend the
+  second guide's hold and shut the pool under it — the count cannot tell which holder a
+  release came from. With a flag per client, closing one guide twice releases once. Sharing
+  from an already-closed client is refused rather than copied: it would hand back a client
+  holding nothing over a pool that may already be shut, and that only surfaces on the first
+  ask. The clamp at zero inside `release` is the last line of defence, not the mechanism.
+- **Four names mean two things each, and the pairs are not renamed.** `Question`,
+  `NoulQuestion`, `ChoiceQuestion` and `ScoreQuestion` each name a user-facing value in
+  `guideme.question`, re-exported from `guideme`, and a pydantic wire model in `guideme.api`.
+  The first is what a caller builds and annotates; the second is the shape it becomes on the
+  way out. They never meet — nothing takes one where the other belongs, the wire models are
+  built only inside `question_to_wire`, and the import graph is one-way — so the collision
+  costs a reader one moment of "which one is this" that the import line answers, and renaming
+  either side would cost more. The wire names have to mirror the API's `type` tags, and the
+  user-facing ones are what a caller writes; a third spelling of either would be the one that
+  had to be explained. `guideme.api.NoulCriteria` and `guideme.question.NoulCriteria` are a
+  fifth such pair, for the same reason, and `api`'s module docstring already says so.
 - **State is JSON-shaped.** Anything `json.dumps` accepts without a default hook. A dataclass
   goes through `dataclasses.asdict`, a pydantic model through `.model_dump()`. This is the one
   untyped value in the package, and it is serialised at the boundary.

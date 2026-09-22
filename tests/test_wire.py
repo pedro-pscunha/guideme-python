@@ -357,12 +357,20 @@ def test_two_async_asks_wait_out_their_retries_at_the_same_time(httpserver: HTTP
     assert len(httpserver.log) == 2 * CONCURRENT
 
 
-def test_a_derived_guide_closes_without_closing_the_pool_it_shares(
-    httpserver: HTTPServer, runner: Runner
+CLOSES = [1, 2]
+"""How many times the derived guide is closed. Once is the ordinary case; twice is the
+caller's mistake, and it must release once rather than spend the parent's hold as well."""
+
+
+@pytest.mark.parametrize("closes", CLOSES, ids=["closed_once", "closed_twice"])
+def test_neither_guide_closes_the_pool_while_the_other_still_holds_it(
+    httpserver: HTTPServer, runner: Runner, closes: int
 ) -> None:
     expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
-    assert runner.paired(noul("Urgent?"), TICKET) == [True, True]
-    assert len(httpserver.log) == 2
+    answers, held = runner.paired(noul("Urgent?"), TICKET, closes)
+    assert answers == [True, True, True]
+    assert len(httpserver.log) == 3
+    assert not held
 
 
 def _spent(input_tokens: int, output_tokens: int) -> str:
@@ -818,6 +826,16 @@ def _an_async_transport_beside_a_timeout(_monkeypatch: pytest.MonkeyPatch) -> No
     _ = GuideBuilder().timeout(SECOND).async_transport(httpx.MockTransport(_answering_offline))
 
 
+def _both_transports(_monkeypatch: pytest.MonkeyPatch) -> None:
+    mock = httpx.MockTransport(_answering_offline)
+    _ = GuideBuilder().transport(mock).async_transport(mock)
+
+
+def _both_transports_the_other_way_round(_monkeypatch: pytest.MonkeyPatch) -> None:
+    mock = httpx.MockTransport(_answering_offline)
+    _ = GuideBuilder().async_transport(mock).transport(mock)
+
+
 def _an_async_transport_built_as_sync(_monkeypatch: pytest.MonkeyPatch) -> None:
     builder = GuideBuilder().api_key(ApiKey("k"))
     _ = builder.async_transport(httpx.MockTransport(_answering_offline)).build()
@@ -851,6 +869,8 @@ def _a_sync_transport_built_as_async(_monkeypatch: pytest.MonkeyPatch) -> None:
         _a_timeout_beside_a_transport,
         _a_transport_beside_a_timeout,
         _an_async_transport_beside_a_timeout,
+        _both_transports,
+        _both_transports_the_other_way_round,
         _an_async_transport_built_as_sync,
         _a_sync_transport_built_as_async,
     ],
@@ -875,6 +895,8 @@ def _a_sync_transport_built_as_async(_monkeypatch: pytest.MonkeyPatch) -> None:
         "a_timeout_beside_a_transport",
         "a_transport_beside_a_timeout",
         "an_async_transport_beside_a_timeout",
+        "both_transports",
+        "both_transports_the_other_way_round",
         "an_async_transport_built_as_sync",
         "a_sync_transport_built_as_async",
     ],

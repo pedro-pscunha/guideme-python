@@ -1,6 +1,5 @@
 """Type-safe inline judgments from TypeSafe Jev."""
 
-from guideme.api import Usage
 from guideme.enums import Choice, Levels, fallback, level, option
 from guideme.errors import (
     AuthError,
@@ -32,7 +31,7 @@ from guideme.question import (
     score,
     score_levels,
 )
-from guideme.receipt import Receipt
+from guideme.receipt import Receipt, Usage
 from guideme.scalars import ApiKey, Confidence, Key, Model, Probability, Rank
 
 __all__ = [

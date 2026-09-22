@@ -51,7 +51,7 @@ ANSWER_EVENT = "guideme.answer"
 """One per question answered."""
 
 RETRY_EVENT = "guideme.retry"
-"""One per throttled attempt, just before the wait. The warning of the Rust SDK."""
+"""One per attempt about to be resent, just before the wait. The warning of the Rust SDK."""
 
 type Events = Literal["span", "log", "both"]
 """Where an answer or a retry is written: the span, an OTLP log record, or both.

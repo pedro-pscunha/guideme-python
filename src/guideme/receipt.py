@@ -2,13 +2,30 @@
 
 Its own module rather than a name in `guideme.guide`, because the generated `ask`
 surfaces name `Receipt` in their return types and `guideme.guide` imports those. One
-module below them is where the type has to live for the graph to stay one-way.
+module below them is where the type has to live for the graph to stay one-way. It
+imports nothing from the package, which is what lets it sit that low.
 """
 
 from dataclasses import dataclass
 from typing import final
 
-from guideme.api import Usage
+
+@final
+@dataclass(frozen=True, slots=True)
+class Usage:
+    """What one request cost, in tokens.
+
+    A plain value object rather than the wire model `guideme.api.Usage`, for the reason
+    `ModelInfo` is one: a caller holding what an ask returned should never have to name a
+    pydantic type, and a type on this surface should not carry a dependency's methods or
+    change shape when that dependency has a major release.
+    """
+
+    input_tokens: int
+    """What is billed."""
+
+    output_tokens: int
+    """What the judgment came back as. Free, and worth watching anyway."""
 
 
 @final
@@ -29,4 +46,4 @@ class Receipt[T]:
     for. Log it: thresholds are tuned against one model's numbers."""
 
     usage: Usage
-    """Input and output tokens for the whole request. Input tokens are what is billed."""
+    """Input and output tokens for the whole request."""
