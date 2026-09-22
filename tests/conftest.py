@@ -228,6 +228,30 @@ def noul_reply(probability: float) -> str:
     return reply({"q0": {"type": "noul", "noul": probability}})
 
 
+MODELS_BODY: Json = {
+    "models": [
+        {
+            "name": MODEL,
+            "description": "The current stable Jev.",
+            "release_date": "2026-02-11",
+        },
+        {
+            "name": "jev-1.12.0",
+            "description": "The Jev before it.",
+            "release_date": "2025-11-04",
+        },
+    ]
+}
+"""A `GET /v1/models` body, as the docs describe one."""
+
+
+def answering_offline(request: httpx.Request) -> httpx.Response:
+    """The whole server one `httpx.MockTransport` test needs: the bearer, then a noul."""
+    assert request.headers["authorization"] == f"Bearer {TEST_KEY}"
+    assert request.url.path == EVALUATE
+    return httpx.Response(200, text=noul_reply(0.95), headers={"content-type": JSON})
+
+
 def expect_post(httpserver: HTTPServer) -> RequestHandler:
     """The handler every `POST /v1/systemone` of one test goes to."""
     return httpserver.expect_request(EVALUATE, method="POST")

@@ -234,6 +234,16 @@ A new test must be one of:
 - a structural import-boundary proof (AST) over `src/guideme`;
 - a redaction proof.
 
+The server-backed checks live in two modules, split at 0.2.0 when the one they were in
+reached a thousand lines. `tests/test_wire.py` is what guideme puts on the wire and reads
+back: the schemas, the docs examples, the request a shape builds, the errors a malformed
+response raises, the unsure ladder, and what a configuration mistake refuses.
+`tests/test_retries.py` is the request that does not simply succeed: the status-to-error
+table, the retry policy on both endpoints, what is and is not resent before a response
+arrives, an injected transport, and the pool two guides share. They are one subject each
+because they are one code path each, and a helper both need — `answering_offline` and
+`MODELS_BODY` — belongs in `conftest.py` rather than being imported across.
+
 Two of the illegal states this package refuses cannot be checker errors: an enum body is opaque
 to pyright, so a `Choice` with two `fallback` members and a `Levels` with one member are a
 `ConfigError` raised at class definition, proven in `tests/test_enums.py`. Every other negative
