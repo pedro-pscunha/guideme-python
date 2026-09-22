@@ -37,6 +37,7 @@ from guideme import (
     UnsureError,
     choose,
     fallback,
+    option,
     score,
 )
 from guideme.api import NoulAnswer, Request, Response, question_to_wire, request_to_wire
@@ -559,6 +560,13 @@ def _levels_given_as_one_string(_monkeypatch: pytest.MonkeyPatch) -> None:
     _ = score_levels("How cross?", "abc")
 
 
+def _a_runtime_level_with_counterexamples(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # `level(...)` offers no counterexamples, so this is an `option(...)` written where a
+    # level belongs. Rendering "Not this option" onto an ordered scale is meaningless and
+    # dropping what it carries is silent, so the constructor refuses it.
+    _ = score_levels("How cross?", [option("Calm", counterexamples=["shouting"]), "Cross"])
+
+
 def _events_log_without_the_logs_api(monkeypatch: pytest.MonkeyPatch) -> None:
     # Asking for log records where `opentelemetry-api` has no logs API is refused where
     # it is asked for. The alternative is a guide that emits none and never says so.
@@ -597,6 +605,7 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         _an_api_key_of_spaces,
         _an_empty_model,
         _levels_given_as_one_string,
+        _a_runtime_level_with_counterexamples,
         _events_log_without_the_logs_api,
         _events_both_without_the_logs_api,
         _events_log_with_a_drifted_log_record,
@@ -610,6 +619,7 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         "api_key_of_spaces",
         "empty_model",
         "levels_given_as_one_string",
+        "a_runtime_level_with_counterexamples",
         "events_log_without_the_logs_api",
         "events_both_without_the_logs_api",
         "events_log_with_a_drifted_log_record",

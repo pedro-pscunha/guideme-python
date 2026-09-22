@@ -1,6 +1,6 @@
 """Type-safe inline judgments from TypeSafe Jev."""
 
-from guideme.enums import Choice, Levels, fallback
+from guideme.enums import Choice, Levels, fallback, level, option
 from guideme.errors import (
     AuthError,
     ConfigError,
@@ -57,7 +57,9 @@ __all__ = [
     "choose",
     "choose_among",
     "fallback",
+    "level",
     "noul",
+    "option",
     "score",
     "score_levels",
 ]

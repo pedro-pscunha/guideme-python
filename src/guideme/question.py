@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from typing import Self, final
 
 from guideme._json import Json
-from guideme.enums import Choice, Levels
+from guideme.enums import Choice, Levels, render, require_no_counterexamples
 from guideme.errors import ConfigError, ProtocolError, UnsureError
 from guideme.policy import (
     MAX_LEVELS,
@@ -432,10 +432,13 @@ def choose_among(instructions: Json, options: Mapping[str, str | None]) -> Choic
     outside it is a `ConfigError` raised here, where the options are written,
     never later at `ask`. Keys cannot collide: a `Mapping` has already made
     them unique.
+
+    A rubric is a string, `None`, or an `option(...)` carrying examples, which
+    are composed into it here: the same text a `Choice` member would send.
     """
     return _choice(
         instructions,
-        tuple(options.items()),
+        tuple((key, None if text is None else render(text)) for key, text in options.items()),
         Key,
         lambda: None,
     )
@@ -468,6 +471,9 @@ def score_levels(instructions: Json, levels: Sequence[str]) -> ScoreQuestion[Ran
     Takes 2 to 10 levels, the same range a `Levels` enum takes; outside it is a
     `ConfigError`.
 
+    A level is a string or a `level(...)` carrying examples, which are composed
+    into it here: the same text a `Levels` member would send.
+
     A `str` is a `Sequence[str]` of its own characters, so `score_levels("…", "abc")`
     would quietly ask about a three-letter scale. It is a `ConfigError` instead.
     """
@@ -476,4 +482,6 @@ def score_levels(instructions: Json, levels: Sequence[str]) -> ScoreQuestion[Ran
             f"levels must be a sequence of level descriptions, got a single {type(levels).__name__}"
         )
         raise ConfigError(detail)
-    return _score(instructions, tuple(levels), Rank)
+    for index, text in enumerate(levels):
+        require_no_counterexamples(f"level {index}", text)
+    return _score(instructions, tuple(render(text) for text in levels), Rank)

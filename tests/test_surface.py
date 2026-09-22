@@ -38,7 +38,9 @@ DOCUMENTED = frozenset(
         "choose",
         "choose_among",
         "fallback",
+        "level",
         "noul",
+        "option",
         "score",
         "score_levels",
     }

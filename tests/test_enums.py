@@ -6,7 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from guideme import ConfigError
-from guideme.enums import Choice, Levels, fallback
+from guideme.enums import Choice, Levels, fallback, level, option
 
 
 def _compare(low: Levels, high: Levels) -> bool:
@@ -69,6 +69,42 @@ def _one_level() -> type[Levels]:
         only = "the only one"
 
     return OneLevel
+
+
+def _a_blank_rubric() -> type[Choice]:
+    class Blank(Choice):
+        a = option("   ")
+
+    return Blank
+
+
+def _an_examples_clause_written_empty() -> type[Choice]:
+    class Empty(Choice):
+        a = option("Payments", examples=[])
+
+    return Empty
+
+
+def _a_blank_example() -> type[Choice]:
+    class Blank(Choice):
+        a = option("Payments", examples=["My card was charged twice", " "])
+
+    return Blank
+
+
+def _a_repeated_example() -> type[Choice]:
+    class Repeated(Choice):
+        a = option("Payments", examples=["Where is my refund?", "Where is my refund?"])
+
+    return Repeated
+
+
+def _a_counterexample_on_a_level() -> type[Levels]:
+    class Marked(Levels):
+        cosmetic = option("No impact", counterexamples=["cannot log in"])
+        blocking = level("No workaround exists")
+
+    return Marked
 
 
 def _eleven_levels() -> type[Levels]:
@@ -136,6 +172,11 @@ REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _duplicate_choice_rubric,
     _duplicate_level_rubric,
     _fallback_on_a_level,
+    _a_blank_rubric,
+    _an_examples_clause_written_empty,
+    _a_blank_example,
+    _a_repeated_example,
+    _a_counterexample_on_a_level,
 ]
 
 REFUSED_IDS = [
@@ -147,6 +188,11 @@ REFUSED_IDS = [
     "two_options_with_the_same_rubric",
     "two_levels_with_the_same_rubric",
     "a_fallback_marker_on_a_levels",
+    "a_blank_rubric",
+    "an_examples_clause_written_empty",
+    "a_blank_example",
+    "a_repeated_example",
+    "a_counterexample_on_a_level",
 ]
 
 
