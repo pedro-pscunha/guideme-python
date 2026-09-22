@@ -162,11 +162,16 @@ def test_examples_move_the_distribution_towards_the_alternative_they_describe() 
     """The invariant the feature exists for, not a number the model is not stable to.
 
     Both halves hold the rubric text constant across their two asks, so the examples
-    are the only thing that changed. Measured on 2026-09-21 against `jev-1.13.0`: a
-    choice over two vague options goes 0.50 bare to 0.88 described, and a noul over
-    vague criteria goes 0.75 plain to 0.17 described, three and four runs each. The
-    noul half is the one where the plain rubric is outright wrong: one of the
-    not-urgent examples is what this ticket describes.
+    are the only thing that changed. Measured on 2026-09-21 against `jev-1.13.0`.
+    The choice half, three runs: 0.50 / 0.49 / 0.53 bare, 0.87 / 0.89 / 0.89 described.
+    The noul half, four runs: 0.75 / 0.75 / 0.74 / 0.76 plain, 0.17 every time with
+    examples. The noul half is the one where the plain rubric is outright wrong: one
+    of the not-urgent examples is what this ticket describes.
+
+    The cross-SDK design measured the same noul case at 0.25 rather than 0.17. The
+    difference is that this ask gives each side counterexamples as well as examples,
+    which the design's probe did not; it is a stronger rubric, not a disagreement
+    between the two SDKs.
     """
     guide = Guide.from_env()
     try:

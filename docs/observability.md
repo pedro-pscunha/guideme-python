@@ -328,9 +328,12 @@ a different backend.
 
 Captured from `otel/opentelemetry-collector-contrib` with the debug exporter and the
 `collector.yaml` above, running `examples/otlp` under `events("log")` against the live API.
-Timestamps, `Flags`, the version on each `InstrumentationScope` line and the resource block are
-trimmed throughout — the version because a capture is taken once and every release would
-otherwise leave a number here that a reader cannot tell from a real one. The first two blocks are
+Timestamps, `Flags` and the resource block are trimmed throughout. The capture was taken at
+**0.1.0** and the `InstrumentationScope` lines carry that version, which is the one the run
+actually emitted; it is left as it was rather than edited forward, so nothing here is a number
+no run produced. Read a version older than the current release as the age of the capture, not
+as a claim about today: the scope names are the contract, and their version is not. The first
+two blocks are
 otherwise complete; the later ones are excerpts, cut to the lines each is making a point about,
 so a missing `Parent ID`, `Kind`, scope line or attribute there means it was cut, not that it
 was absent. Nothing is reworded, and no value is invented.
@@ -338,7 +341,7 @@ was absent. Nothing is reworded, and no value is invented.
 The three-question batch is one ask span with one attempt under it:
 
 ```
-InstrumentationScope guideme
+InstrumentationScope guideme 0.1.0
 Span #1
     Trace ID       : 164107043647c42bc827fff022ec4308
     Parent ID      :
@@ -358,7 +361,7 @@ Attributes:
      -> gen_ai.usage.input_tokens: Int(422)
      -> gen_ai.usage.output_tokens: Int(71)
 
-InstrumentationScope guideme.api
+InstrumentationScope guideme.api 0.1.0
 Span #1
     Trace ID       : 164107043647c42bc827fff022ec4308
     Parent ID      : 53c4b9ada6417408
@@ -378,7 +381,7 @@ Attributes:
 Its three answers arrive on the logs pipeline, each carrying the ask span's ids:
 
 ```
-InstrumentationScope guideme
+InstrumentationScope guideme 0.1.0
 LogRecord #1
 SeverityText: INFO
 SeverityNumber: Info(9)
@@ -443,7 +446,7 @@ throttled attempt's rather than the ask's. The live API does not throttle on dem
 block is from a local server that answers `429` once:
 
 ```
-InstrumentationScope guideme.api
+InstrumentationScope guideme.api 0.1.0
 LogRecord #0
 SeverityText: WARN
 SeverityNumber: Warn(13)

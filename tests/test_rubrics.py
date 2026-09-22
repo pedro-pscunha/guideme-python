@@ -27,14 +27,16 @@ COSMETIC = "No impact to functionality"
 # The golden table of the cross-SDK design: the inputs, and the exact bytes both SDKs
 # render them to. `guideme-rust` reproduces this table from its derive macro, and
 # spec/vectors/rubric.json is where the two are held to each other.
-GOLDEN: list[tuple[str, str]] = [
-    (option(BILLING), BILLING),
+GOLDEN: list[tuple[str, str, str]] = [
+    (option(BILLING), BILLING, BILLING),
     (
         option(TECHNICAL, examples=["502 on every request"]),
+        TECHNICAL,
         f"{TECHNICAL}\nExamples: 502 on every request",
     ),
     (
         option(BILLING, examples=["My card was charged twice", "Where is my refund?"]),
+        BILLING,
         f"{BILLING}\nExamples: My card was charged twice; Where is my refund?",
     ),
     (
@@ -43,14 +45,17 @@ GOLDEN: list[tuple[str, str]] = [
             examples=["My card was charged twice"],
             counterexamples=["The dashboard is down"],
         ),
+        BILLING,
         f"{BILLING}\nExamples: My card was charged twice\nNot this option: The dashboard is down",
     ),
     (
         option(BILLING, counterexamples=["The dashboard is down"]),
+        BILLING,
         f"{BILLING}\nNot this option: The dashboard is down",
     ),
     (
         level(COSMETIC, examples=["typo in a label", "misaligned icon"]),
+        COSMETIC,
         f"{COSMETIC}\nExamples: typo in a label; misaligned icon",
     ),
     # Both clauses are written out of alphabetical order, so a renderer that sorted or
@@ -62,6 +67,7 @@ GOLDEN: list[tuple[str, str]] = [
             examples=["Where is my refund?", "My card was charged twice"],
             counterexamples=["The dashboard is down", "A 502 on every request"],
         ),
+        BILLING,
         (
             f"{BILLING}\nExamples: Where is my refund?; My card was charged twice"
             f"\nNot this option: The dashboard is down; A 502 on every request"
@@ -80,12 +86,14 @@ GOLDEN_IDS = [
 ]
 
 
-@pytest.mark.parametrize(("rubric", "expected"), GOLDEN, ids=GOLDEN_IDS)
-def test_a_rubric_renders_the_bytes_the_contract_names(rubric: str, expected: str) -> None:
+@pytest.mark.parametrize(("rubric", "bare", "expected"), GOLDEN, ids=GOLDEN_IDS)
+def test_a_rubric_renders_the_bytes_the_contract_names(
+    rubric: str, bare: str, expected: str
+) -> None:
     assert render(rubric) == expected
     # The value itself stays the bare text: a rubric only expands where it becomes
-    # wire text, so a member's value reads as it is written.
-    assert str(rubric) in {BILLING, TECHNICAL, COSMETIC}
+    # wire text, so a member's value reads exactly as it was written.
+    assert str(rubric) == bare
 
 
 @given(st.text(min_size=1).filter(lambda text: bool(text.strip())))

@@ -166,6 +166,16 @@ Each module survives the test.
   equals `"x"`, so two options whose text matches are still one member however their examples
   differ, and a member's `.value` still reads as it was written. The expansion happens only in
   the request.
+- **A blank rubric is refused where examples can attach, and accepted where a bare string
+  always was.** `option("   ")` is a `ConfigError`, while a bare `""` reaching `choose_among`,
+  `score_levels` or a `Choice` member is not. The asymmetry is deliberate and it is a version
+  boundary, not an oversight: a bare blank rubric was legal in 0.1.0, and refusing it in a
+  patch release would break a caller who is doing nothing new. The new constructors have no
+  such history, so they are strict from the start. `guideme-rust` draws the same line from the
+  other side — its derive had made an empty `what` an unconditional compile error and narrowed
+  it to fire only when examples are attached, for this reason. A reader of both SDKs should
+  find the same rule: strict where examples are, unchanged where they are not. Revisit at a
+  major bump, together.
 - **A clause left out is `None`; an empty one was written on purpose.** `examples` and
   `counterexamples` default to `None`, which is how "there are none" is said, so any empty
   sequence that arrives was typed by the caller and says nothing — a `ConfigError`, whatever

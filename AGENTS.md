@@ -40,7 +40,7 @@ two pages: `https://docs.typesafe.ai/api.md` covers `POST /v1/systemone` and
 | `src/guideme/scalars.py` | `Probability`, `Confidence`, `Key`, `Rank`, `ApiKey`, `Model` | validation happens once, here; `ApiKey` never prints |
 | `src/guideme/errors.py` | the `GuidemeError` tree and `kind` | `kind` is the cross-SDK name and the `error.type` value; imports nothing from `guideme` |
 | `src/guideme/policy.py` | `resolve`, `Policy`, `Thresholds`, `Verdict`, the answer and outcome dataclasses | pure: no I/O, no caller enums, keys and level indices only |
-| `src/guideme/enums.py` | `Choice`, `Levels`, `option`, `level`, `fallback`, `render` | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there. `render` is the one place a rubric's examples become wire text, and its output is a cross-SDK contract item |
+| `src/guideme/enums.py` | `Choice`, `Levels`, `option`, `level`, `fallback`, and the internals `render` and the `require_*` checks | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there. `render` is the one place a rubric's examples become wire text, and its output is a cross-SDK contract item. `render`, `require_unshared_examples`, `require_no_counterexamples` and `require_no_fallback` are internal despite their names: they are imported by `question.py` and are in no tier, like `question.validate` |
 | `src/guideme/question.py` | question kinds, constructors, `Ranked`, `Scored`, the unsure ladder | a question is inert until asked; the reader travels with it |
 | `src/guideme/ask.py` | shapes: `encode`, `decode`, `Plan` | ids are `q0..qN` in encounter order, insertion order for a dict |
 | `src/guideme/_ask_overloads.py` | the typed `ask` surfaces | GENERATED; edit `scripts/gen_ask_overloads.py` and run `mise run gen` |
@@ -306,9 +306,12 @@ green before the tag, not after.
 1. Bump `version` in `pyproject.toml`. Then `uv lock` at the root and `uv lock` inside
    `examples/otlp`: both lock files record the version, and both are resolved with `--locked`.
 2. Move the `Unreleased` notes in `CHANGELOG.md` under the new version with today's date.
-3. Refresh the **What arrives** capture in `docs/observability.md`, or elide the version in it.
-   Its `InstrumentationScope guideme X.Y.Z` lines carry the version the capture was taken at,
-   so they go stale on the first bump and a reader cannot tell a stale capture from a real one.
+3. Leave the **What arrives** capture in `docs/observability.md` alone unless you re-take it.
+   Its `InstrumentationScope guideme X.Y.Z` lines carry the version the run actually emitted,
+   and the prose above it names that version, so a reader can tell the capture's age from a
+   claim about today. Do not edit the version forward to match a release no run produced, and
+   do not delete it either: that loses the provenance permanently. Re-take the capture and
+   update both together, or change nothing.
 4. `mise run check`, then open a pull request and squash-merge it with CI green.
 5. On `main`, at that commit: `git tag -a vX.Y.Z -m vX.Y.Z` and `git push origin vX.Y.Z`. The
    tag ruleset refuses a tag that is later moved or deleted, so tag the commit you mean.

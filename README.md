@@ -142,9 +142,23 @@ Not this option: The dashboard is down
 ```
 
 So a rubric with no examples sends exactly what it sent before, and the same strings work in
-`choose_among("…", {"billing": option(…)})`, `score_levels("…", [level(…), …])` and
-`noul("…").criteria(option(…), option(…))`. Examples and counterexamples render in the order
-they are written, always: that order is part of the published contract.
+`choose_among("…", {"billing": option(…)})` and `score_levels("…", [level(…), …])`. Examples
+and counterexamples render in the order they are written, always: that order is part of the
+published contract.
+
+A yes and a no are two alternatives of one question, so they take examples too, and this is
+where they pay best — a vague pair is the easiest thing to get wrong:
+
+```python
+urgent = noul("Is this ticket urgent?").criteria(
+    option("Urgent", examples=["customers cannot log in", "money is moving to the wrong place"]),
+    option("Not urgent", examples=["a broken job with a manual workaround", "a cosmetic bug"]),
+)
+```
+
+Asked about a nightly export job that has been failing since Tuesday while the numbers are
+pulled by hand, a plain `Urgent` / `Not urgent` answers yes at 0.75. The criteria above answer
+no at 0.17, because one of the not-urgent examples is what the ticket describes.
 
 A string may be an example of one option and a counterexample of another. That is the point
 when two options are confusable, and it is the one overlap that stays legal. Offering the same

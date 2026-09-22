@@ -18,15 +18,37 @@ changing the copy.
 
 The rendered rubric string is a contract item too. An alternative written with `option(…)`,
 `level(…)` or `fallback(…)` carries its examples beside its text, and the string those compose
-into — clauses joined with a newline, items within one joined with `"; "`, the text verbatim,
-and the text alone when there are no examples — is what goes on the wire. Every guideme SDK
-composes the same string from the same parts, and `spec/vectors/rubric.json` is where the
-renderers are held to each other. All three kinds of question carry them, a noul's yes and no
-included.
+into is what goes on the wire. Every guideme SDK composes the same string from the same parts,
+and `spec/vectors/rubric.json` is where the renderers are held to each other. All three kinds
+of question carry them, a noul's yes and no included.
 
-**Order is part of it.** Examples and counterexamples render in the order they were written,
-never sorted and never collapsed into a set, because two SDKs ordering differently would send
-different bytes for the same declaration.
+The algorithm, in full, because this is what a new SDK implements from:
+
+```
+render(what, examples, counterexamples) -> string:
+    if examples is empty and counterexamples is empty:
+        return what                     # unchanged, byte for byte
+    lines = [what]
+    if examples:
+        lines.append("Examples: " + join(examples, "; "))
+    if counterexamples:
+        lines.append("Not this option: " + join(counterexamples, "; "))
+    return join(lines, "\n")
+```
+
+The two labels are literal and exact: `"Examples: "` and `"Not this option: "`, each with its
+trailing space. They are not formatting to be chosen locally — `Not this option` was measured
+against `Not` and `Counterexamples` on the same confusable case and reached the correct option
+with the highest mean probability of the three, so a different label is a different, and worse,
+contract. The examples clause always precedes the counterexamples clause.
+
+`what` is used verbatim: never trimmed, never re-punctuated. Newline separation is what makes
+that safe, since examples often end in `?` and a space-joined format would need a trailing `.`
+that produces `Where is my refund?.`.
+
+**Order within a clause is part of it too.** Examples and counterexamples render in the order
+they were written, never sorted and never collapsed into a set, because two SDKs ordering
+differently would send different bytes for the same declaration.
 
 One asymmetry is deliberate. `choose_among` and `score_levels` here take an `option(…)` or a
 `level(…)` value; Rust's equivalents keep taking a plain string, because widening their
