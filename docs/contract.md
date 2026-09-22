@@ -50,6 +50,35 @@ that produces `Where is my refund?.`.
 they were written, never sorted and never collapsed into a set, because two SDKs ordering
 differently would send different bytes for the same declaration.
 
+`spec/vectors/rubric.json` carries one object per case with five fields: `kind`, one of
+`choice`, `levels` or `noul`, which says what surface the case came from; `what`, the rubric
+text; `examples` and `counterexamples`, the two clauses in declaration order; and `rendered`,
+the exact bytes the algorithm above must produce. The `noul` cases come from the runtime
+renderer rather than a derive, so they are the vector's only cover for that path.
+
+### What counts as blank, and what counts as a duplicate
+
+Two rules a third implementer would otherwise have to guess, and would guess differently.
+
+**A blank rubric is only an error when examples are attached to it.** A rubric that carries no
+examples is never refused for its text, whatever that text is: it means what it meant before
+this feature existed, and a patch release does not get to redefine it. Attaching examples to a
+blank rubric is the error, because they describe something that is not there. Both SDKs draw
+the line in the same place — Python inside `option()`, `level()` and `fallback()`, Rust in the
+derive and in `Rubric::into_wire()` — so a declaration is legal in both or in neither.
+
+**"Blank" means Unicode `White_Space`.** Rust's `str::trim` is exactly that property. Python's
+`str.strip()` is a superset: measured against the current runtime it strips 29 codepoints to
+`White_Space`'s 25, the four extra being `U+001C`–`U+001F`, the file, group, record and unit
+separators. So a rubric made only of those characters is blank to Python and not to Rust. That
+boundary is stated rather than hidden, and it is deliberate: those four are C0 controls that are
+never valid rubric text, so no real declaration reaches the difference.
+
+**A duplicate is an exact string match**, with no normalisation, no case folding and no
+trimming. `"a"` and `" a"` are two different examples and may sit in the same clause. An
+implementation that normalised before comparing would refuse declarations these SDKs accept,
+which is the same divergence as a different label by another route.
+
 One asymmetry is deliberate. `choose_among` and `score_levels` here take an `option(…)` or a
 `level(…)` value; Rust's equivalents keep taking a plain string, because widening their
 signatures risks inference breakage for existing callers on a path that can already pass a
