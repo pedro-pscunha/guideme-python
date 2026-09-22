@@ -258,6 +258,10 @@ Each module survives the test.
   second `Usage` — and it is the right way round: a caller reaching the top-level surface gets
   the value object, and the name they would otherwise collide with is in a module they only
   import when they are building requests by hand.
+- **`Client` and `AsyncClient` live in `guideme.api.client`, not on `guideme.api`.**
+  Re-exporting them from `guideme.api` would make `api` and `api.client` import each other,
+  and the gate fails an import cycle. So a caller who builds requests by hand imports the
+  wire models from one module and the clients from the other.
 - **State is JSON-shaped.** Anything `json.dumps` accepts without a default hook. A dataclass
   goes through `dataclasses.asdict`, a pydantic model through `.model_dump()`. This is the one
   untyped value in the package, and it is serialised at the boundary.

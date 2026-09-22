@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-Nothing yet.
+### Documentation
+
+- The README is rewritten in plain English with the headings, the order and the terms that
+  every guideme SDK now shares. Design rationale and measurements it carried are in
+  `docs/design.md`, and the contributor notes are in `CONTRIBUTING.md`. The TypeScript SDK is
+  listed under **Other SDKs**. No behaviour changes.
 
 ## 0.2.0 — 2026-09-22
 

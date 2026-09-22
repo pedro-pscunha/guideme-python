@@ -2,8 +2,8 @@
 
 guideme makes a TypeSafe Jev judgment usable as Python control flow. It is one distribution,
 `guideme`. Its public surface is what `src/guideme/__init__.py` exports, plus a second
-supported tier that callers import by their own path: the modules `guideme.api` and
-`guideme.policy`, and the single name `guideme.question.Question`.
+supported tier that callers import by their own path: the modules `guideme.api`,
+`guideme.api.client` and `guideme.policy`.
 Everything else in the package is private. `AGENTS.md` and the README's **Lower layers**
 section say what each tier promises.
 
@@ -37,6 +37,9 @@ mise run hooks    # activate the tracked git hooks, once per clone
 mise run test     # while you work
 mise run check    # the full gate; the pre-push hook runs it too
 ```
+
+A source distribution carries the tests but not `mise.toml` or `uv.lock`, so from one rather
+than a clone, run the suite with `uv run --group dev pytest`.
 
 The suite is small on purpose and `AGENTS.md` says what a new test may be. A pull request that
 adds a mock of `policy`, of `Guide` or of the transport will be asked to replace it with a real
