@@ -63,9 +63,19 @@ def _items(what: str, items: Sequence[str] | None, named: str) -> tuple[str, ...
 
     `None` is the clause left out. Anything else that is empty was written on purpose
     and says nothing, which is the caller's mistake rather than a default.
+
+    A `str` is a `Sequence[str]` of its own characters, so `examples="refund"` would
+    quietly become six one-letter examples. It is a `ConfigError` instead, the same
+    way `score_levels` refuses a scale given as one string.
     """
     if items is None:
         return ()
+    if isinstance(items, str | bytes):
+        detail = (
+            f"{what!r}: {named} must be a sequence of strings, got a single "
+            f"{type(items).__name__}; wrap it in a list"
+        )
+        raise ConfigError(detail)
     if not items:
         detail = f"{what!r}: {named}= is empty; a clause written on purpose must say something"
         raise ConfigError(detail)
@@ -93,7 +103,8 @@ def _rubric(
         raise ConfigError(detail)
     shown = _items(rubric, examples, "examples")
     excluded = _items(rubric, counterexamples, "counterexamples")
-    both = [item for item in shown if item in set(excluded)]
+    ruled_out = set(excluded)
+    both = [item for item in shown if item in ruled_out]
     if both:
         detail = (
             f"{rubric!r}: {both[0]!r} is both an example and a counterexample of it, which "
@@ -196,6 +207,21 @@ def require_unshared_examples(where: str, rubrics: Iterable[tuple[str, str | Non
                     f"of one of them instead"
                 )
                 raise ConfigError(detail)
+
+
+def require_no_fallback(where: str, rubric: str | None) -> None:
+    """Refuse a `fallback(...)` where there is no `Choice` member for it to mark.
+
+    The runtime constructors answer in a `Key`, a `Rank` or a `bool`, none of which has
+    a member to fall back to, so the marking has nothing to act on. Dropping it would
+    leave a caller believing an unsure answer is handled when it raises instead.
+    """
+    if isinstance(rubric, _Rubric) and rubric.is_fallback:
+        detail = (
+            f"{where}: fallback(...) marks a member of a Choice and there is none here; "
+            f"use .otherwise(value) on the question"
+        )
+        raise ConfigError(detail)
 
 
 def require_no_counterexamples(where: str, rubric: str) -> None:

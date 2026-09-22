@@ -85,6 +85,15 @@ def _an_examples_clause_written_empty() -> type[Choice]:
     return Empty
 
 
+def _examples_given_as_one_string() -> type[Choice]:
+    # A `str` is a `Sequence[str]`, so the checker allows it and the clause would be
+    # the six letters of "refund".
+    class Shredded(Choice):
+        a = option("Payments", examples="refund")
+
+    return Shredded
+
+
 def _an_empty_tuple_written_out() -> type[Choice]:
     # `None` is how a clause is left out, so an empty sequence is always a clause
     # written on purpose that says nothing -- whatever type the caller reached for.
@@ -210,6 +219,7 @@ REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _fallback_on_a_level,
     _a_blank_rubric,
     _an_examples_clause_written_empty,
+    _examples_given_as_one_string,
     _an_empty_tuple_written_out,
     _a_blank_example,
     _a_repeated_example,
@@ -230,6 +240,7 @@ REFUSED_IDS = [
     "a_fallback_marker_on_a_levels",
     "a_blank_rubric",
     "an_examples_clause_written_empty",
+    "examples_given_as_one_string",
     "an_empty_tuple_written_out",
     "a_blank_example",
     "a_repeated_example",

@@ -15,6 +15,7 @@ from guideme.enums import (
     Levels,
     render,
     require_no_counterexamples,
+    require_no_fallback,
     require_unshared_examples,
 )
 from guideme.errors import ConfigError, ProtocolError, UnsureError
@@ -337,6 +338,8 @@ class NoulQuestion(_Binary[bool], _Fallible[bool]):
         here: a yes and a no are as confusable as two options of a choice, and showing
         an input that belongs to each is what tells them apart.
         """
+        require_no_fallback("criteria yes", yes)
+        require_no_fallback("criteria no", no)
         require_unshared_examples("criteria", (("yes", yes), ("no", no)))
         return replace(self, spec=NoulSpec(NoulCriteria(render(yes), render(no))))
 
@@ -446,8 +449,12 @@ def choose_among(instructions: Json, options: Mapping[str, str | None]) -> Choic
     them unique.
 
     A rubric is a string, `None`, or an `option(...)` carrying examples, which
-    are composed into it here: the same text a `Choice` member would send.
+    are composed into it here: the same text a `Choice` member would send. A
+    `fallback(...)` is a `ConfigError`: this answers in a `Key`, so there is no
+    member for the marking to name; use `.otherwise(...)` on the question.
     """
+    for key, text in options.items():
+        require_no_fallback(f"choose_among option {key!r}", text)
     require_unshared_examples("choose_among", options.items())
     return _choice(
         instructions,
@@ -497,6 +504,7 @@ def score_levels(instructions: Json, levels: Sequence[str]) -> ScoreQuestion[Ran
         raise ConfigError(detail)
     for index, text in enumerate(levels):
         require_no_counterexamples(f"level {index}", text)
+        require_no_fallback(f"level {index}", text)
     require_unshared_examples(
         "score_levels", ((f"level {index}", text) for index, text in enumerate(levels))
     )

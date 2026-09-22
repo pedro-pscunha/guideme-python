@@ -31,6 +31,14 @@ Additive. Nothing that worked in 0.1.0 sends different bytes.
   of the same question, or as both an example and a counterexample of the same alternative. One
   string as an example of one alternative and a counterexample of another stays legal — that is
   the confusable-options pattern the feature exists for.
+- A clause given as one string is refused rather than shredded. A `str` is a `Sequence[str]` of
+  its own characters, so `examples="refund"` would have become six one-letter examples and no
+  type checker would have said so; it is a `ConfigError` naming the mistake, the same way
+  `score_levels` already refuses a scale given as one string.
+- `fallback(…)` is refused by `choose_among`, `score_levels` and `noul(…).criteria(…)`. Those
+  answer in a `Key`, a `Rank` and a `bool`, none of which has a member to fall back to, so the
+  marking had nothing to act on and was being dropped in silence. Use `.otherwise(…)` on the
+  question, which is what the `Levels` rule has always said.
 
 ## 0.1.0 — 2026-09-21
 

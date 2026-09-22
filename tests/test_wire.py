@@ -567,6 +567,21 @@ def _a_runtime_level_with_counterexamples(_monkeypatch: pytest.MonkeyPatch) -> N
     _ = score_levels("How cross?", [option("Calm", counterexamples=["shouting"]), "Cross"])
 
 
+def _a_fallback_as_a_runtime_option(_monkeypatch: pytest.MonkeyPatch) -> None:
+    # `choose_among` answers in a `Key`, so there is no member for the marking to name.
+    # Accepting it and dropping it would leave the caller believing an unsure answer is
+    # handled when it raises instead. Same for the two below.
+    _ = choose_among("Which team?", {"sales": fallback("Pricing"), "billing": "Money"})
+
+
+def _a_fallback_as_a_runtime_level(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = score_levels("How cross?", [fallback("Calm"), "Cross"])
+
+
+def _a_fallback_as_a_noul_criterion(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = noul("Urgent?").criteria(fallback("Needs a person now"), "Can wait")
+
+
 def _one_example_of_two_runtime_options(_monkeypatch: pytest.MonkeyPatch) -> None:
     # One input cannot belong to two options. The reverse -- an example of one and a
     # counterexample of another -- is legal and is what tells confusable options apart.
@@ -626,6 +641,9 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         _an_empty_model,
         _levels_given_as_one_string,
         _a_runtime_level_with_counterexamples,
+        _a_fallback_as_a_runtime_option,
+        _a_fallback_as_a_runtime_level,
+        _a_fallback_as_a_noul_criterion,
         _one_example_of_two_runtime_options,
         _one_example_of_both_noul_criteria,
         _events_log_without_the_logs_api,
@@ -642,6 +660,9 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         "empty_model",
         "levels_given_as_one_string",
         "a_runtime_level_with_counterexamples",
+        "a_fallback_as_a_runtime_option",
+        "a_fallback_as_a_runtime_level",
+        "a_fallback_as_a_noul_criterion",
         "one_example_of_two_runtime_options",
         "one_example_of_both_noul_criteria",
         "events_log_without_the_logs_api",
