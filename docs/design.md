@@ -92,6 +92,22 @@ Each module survives the test.
   `asyncio.run` rather than adding a pytest plugin.
 - **Jitter comes from the standard library.** `random.SystemRandom`, so backoff needs no extra
   dependency and does not disturb a caller who seeded the global `random`.
+- **Only a failure that never reached a server is resent.** `httpx.ConnectError` and
+  `httpx.ConnectTimeout` mean the request did not arrive, so nothing was judged and a resend
+  repeats nothing. A read timeout, a `RemoteProtocolError` and a body that will not decode all
+  mean it did arrive: the API may have answered and billed it, and asking again would buy the
+  same judgment twice. Idempotency is the line, not whether the failure looks transient.
+- **A transport is injectable and refuses a timeout beside it.** `transport(…)` gives a caller
+  a proxy, a client certificate or an `httpx.MockTransport`, which is what makes their own
+  control flow testable without a server. `httpx` hands a transport the client's timeout as a
+  request extension it may ignore — `MockTransport` does — so a timeout set beside one is a
+  promise nothing keeps. It is a `ConfigError` in either order rather than a silent override.
+- **`Receipt` has its own module.** `_ask_overloads` names it in a return type and `guide`
+  imports `_ask_overloads`, so it cannot live beside `ModelInfo` in `guide` without a cycle.
+  `guideme.receipt` sits above `guideme.api`, which is where `Usage` is declared, and that
+  `Usage` is exported as-is rather than copied into a plain value object the way `ModelInfo`
+  copies `ModelEntry`: two integers with no behaviour do not earn a second name, and
+  `guideme.api` is a published tier already.
 - **Telemetry speaks OpenTelemetry.** The ask span uses the GenAI conventions, each HTTP
   attempt is its own client span with the HTTP conventions, and a failure is `error.type` plus
   an error span status rather than an error-level record. Anything without a convention is
@@ -192,15 +208,14 @@ Each module survives the test.
   name the internal `Client` and the private `_Config`, because Python has no private
   constructor, not because either is supported. Build one through `Guide.builder()` or
   `Guide.from_env()`; those are what validate the policy and the origin before a socket opens.
-- **`with_policy` shares the pool.** The copy holds the same client, so `close()` on either the
-  original or the copy closes the connection pool for both.
-- **`Question` is supported, and not in `__all__`.** The top-level surface is a fixed list and
-  a question's type is whatever its constructor returns, so callers annotate by inference.
-  `guideme.question.Question` is in the second tier, beside `guideme.api` and
-  `guideme.policy`, and carries the same promise: import it from there when you need to write
-  the type of a stored question down. The promise is that one name. The rest of the module,
-  `validate`, `Spec` and the concrete question classes, is private, because naming the whole
-  module would publish all of it to let a caller annotate one thing.
+- **`with_policy` shares the pool, and the pool is counted.** The copy holds the same client
+  over the same `httpx` client, and a private `_Pool` counts its holders. Each guide releases
+  once and the transport closes when the last one does, so closing a derived guide leaves its
+  parent able to ask. Rust needs none of this: `Arc<Inner>` drops when the last clone does.
+  Until 0.2.0 the count did not exist and `close()` on either guide closed both, which was
+  survivable as a documented sharp edge and would have been a trap the moment `with` existed.
+  A guide closed twice is the caller's mistake; the count stops at zero rather than going
+  negative, so the second close does nothing.
 - **Two `Question`s.** `guideme.question.Question` is the user-facing value;
   `guideme.api`'s question model is the wire shape it becomes.
 - **State is JSON-shaped.** Anything `json.dumps` accepts without a default hook. A dataclass

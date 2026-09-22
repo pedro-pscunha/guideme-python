@@ -21,7 +21,7 @@ is announced to every other SDK.
 ```
 guideme.ask                      span, kind CLIENT, one per ask
 ├── POST /v1/systemone           span, kind CLIENT, one per HTTP attempt
-│   └── guideme.retry            event and WARN log record, when that attempt was throttled
+│   └── guideme.retry            event and WARN log record, when that attempt is being resent
 └── guideme.answer               event and INFO log record, one per question
 ```
 
@@ -103,15 +103,28 @@ so it says what the model answered rather than what the caller ended up with.
 
 ### Event `guideme.retry`
 
-Emitted inside the throttled attempt's span, just before the wait. It is the
+Emitted inside the failed attempt's span, just before the wait. It is the
 warning-equivalent: OpenTelemetry span events carry no severity, so where the Rust SDK logs
 this at `WARN`, here the event's presence is the signal.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `http.response.status_code` | int | `429` or `529` |
+| `http.response.status_code` | int | `429` or `529`; present only when a response arrived |
+| `error.type` | str | `transport`; present only when none did |
 | `guideme.retry.attempt` | int | ordinal of the resend about to be made; `1` for the first retry |
 | `guideme.retry.delay_ms` | int | how long guideme is about to wait |
+
+**Exactly one of the first two is on every event, and neither is ever a placeholder.** An
+attempt is resent either because the API answered `429` or `529`, or because the request
+never reached a server at all: a refused connection, a reset, a failed TLS handshake, a
+connect timeout. Those two are different incidents — a throttled API and an unreachable one
+— and a dashboard grouping retries by cause must be able to tell them apart, so the cause is
+the field that is present rather than a value inside one field. The attempt's own span is
+marked `error.type = transport` for the second case, as it already is for a transport
+failure that is not resent.
+
+A read timeout, a disconnect part-way through a response, and a body that will not decode
+produce no retry event: none of them is resent, because the request reached the server.
 
 ### Log records
 
@@ -125,7 +138,7 @@ cannot have: a severity, a message, and an identity of its own.
 | instrumentation scope | `guideme` | `guideme.api` |
 | event name | `guideme.answer` | `guideme.retry` |
 | severity text, number | `INFO`, 9 | `WARN`, 13 |
-| body | `q0 noul: yes`, `q1 choice: billing`, `q2 score: level 1` | `429 from TypeSafe, retrying in 1000 ms` |
+| body | `q0 noul: yes`, `q1 choice: billing`, `q2 score: level 1` | `429 from TypeSafe, retrying in 1000 ms`, or `could not reach TypeSafe, retrying in 500 ms` |
 | attributes | the `guideme.answer` table above, unchanged | the `guideme.retry` table above, unchanged |
 | trace id, span id | the `guideme.ask` span's | the throttled attempt span's |
 

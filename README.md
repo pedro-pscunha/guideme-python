@@ -271,19 +271,108 @@ list or dict, which is the shape above.
 `await` and the `httpx` client underneath.
 
 ```python
-guide = AsyncGuide.from_env()
-verdict: Verdict = await guide.ask(noul("Is this about billing?").detail(), ticket)
-await guide.close()
+async with AsyncGuide.from_env() as guide:
+    verdict: Verdict = await guide.ask(noul("Is this about billing?").detail(), ticket)
 ```
 
-The synchronous version is the same three lines with `Guide` and without the `await`s.
+The synchronous version is the same two lines with `Guide`, `with` and no `await`.
 `Guide.builder()` and `AsyncGuide.builder()` return the same `GuideBuilder`; `.build()` gives
-the synchronous guide and `.build_async()` the asynchronous one.
+the synchronous guide and `.build_async()` the asynchronous one. Leaving the block closes the
+guide, and `guide.close()` does the same thing by hand for a guide that outlives any block.
+
+A guide holds a connection pool, so build one and share it: both kinds are safe to use from
+several threads or several tasks at once, and one guide asking concurrently is what the pool
+is for. Building one per request works but opens a pool per request, which is the cost the
+pool exists to avoid. `guide.with_policy(…)` returns a second guide over the *same* pool, and
+the two are counted, so closing either leaves the other able to ask and the pool closes when
+the last of them does. Close each guide once.
 
 Both guides also answer `models()`, which returns a `tuple[ModelInfo, ...]`: the models the
 account may use, each with its `name`, `description` and `release_date`. It is one call to
-`GET /v1/models` and gets no ask span of its own. Unlike `ask`, it is not retried: a `429` or a
-`529` raises on the first attempt, so the two rows below that mention retries do not apply to it.
+`GET /v1/models` and gets no ask span of its own. It is retried on exactly the terms an ask
+is, so a `429` while your process is starting up does not fail the start.
+
+## What a request cost
+
+`ask_with_receipt` is `ask` with the response's own numbers kept. It takes the same shapes and
+infers the same types; `ask` is this call followed by `.answer`.
+
+```python
+receipt: Receipt[bool] = guide.ask_with_receipt(noul("Is this urgent?"), ticket)
+
+if receipt.answer:
+    prioritise()
+meter(model=receipt.model, tokens=receipt.usage.input_tokens)
+```
+
+`Receipt` is frozen and carries three things: `answer`, whatever `ask` would have returned;
+`model`, the versioned id that actually answered, which is `jev-1.13.0` and not `jev-latest`
+even when an alias was asked for; and `usage`, a `Usage` with `input_tokens` and
+`output_tokens`. Input tokens are what is billed. Log the model: thresholds are tuned against
+one model's numbers, and the alias moves under you.
+
+## Configuration
+
+Every setter on `GuideBuilder` returns the builder, and `Guide.builder()` starts one.
+
+| Setter | Default | What it does |
+|---|---|---|
+| `api_key(ApiKey(…))` | none; required | The key. `from_env()` reads it from `TYPESAFE_API_KEY`. |
+| `base_url(…)` | `https://api.typesafe.ai` | The API origin. It may not carry credentials. |
+| `model(Model(…))` | `jev-latest` | The model or alias to ask. |
+| `policy(Policy(…))` | the defaults | The guide-wide policy patch; a question's own wins over it. |
+| `max_retries(n)` | `3` | Resends per call, `0` to never resend. |
+| `backoff(…)` | 500 ms | Base of the exponential backoff. |
+| `timeout(…)` | 30 s | Per phase of one attempt. Read the paragraph below. |
+| `transport(…)` / `async_transport(…)` | `httpx`'s own | Send through your `httpx` transport. |
+| `record_state(True)` | off | Put the state JSON on the ask span. It is your users' data. |
+| `events(…)` | `"both"` | Whether an answer and a retry go to the span, a log record, or both. |
+
+**`timeout` is not a deadline for the attempt.** `httpx` gives the whole budget to each phase
+separately — connecting, writing, reading, and waiting for a pooled connection — so one attempt
+that is slow in more than one phase takes longer than the timeout without breaching anything.
+Worst case for a call is `max_retries + 1` attempts of several phases each, plus the backoff
+between them. The Rust SDK's `reqwest` deadline covers the attempt as a whole instead; the two
+differ because their HTTP clients do, and `docs/contract.md` records it as a divergence rather
+than leaving you to find it.
+
+`transport(…)` and `timeout(…)` refuse each other, in whichever order you write them: a
+timeout belongs to the transport that honours it, and `httpx` hands yours this budget as a
+request extension it is free to ignore. A silent no-op would be worse than a `ConfigError`.
+`transport(…)` is for `build()` and `async_transport(…)` for `build_async()`; using one with
+the other build is a `ConfigError` too.
+
+## Testing your code
+
+Pass a transport and your control flow is testable with no server, no port and no key:
+
+```python
+import httpx
+from guideme import ApiKey, Guide, GuideBuilder, noul
+
+
+def answer(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "model": "jev-1.13.0",
+            "answers": {"q0": {"type": "noul", "noul": 0.95}},
+            "usage": {"input_tokens": 296, "output_tokens": 20},
+        },
+    )
+
+
+def test_an_urgent_ticket_is_prioritised() -> None:
+    builder = GuideBuilder().api_key(ApiKey("not-a-real-key"))
+    with builder.transport(httpx.MockTransport(answer)).build() as guide:
+        assert guide.ask(noul("Is this urgent?"), "payouts failing") is True
+```
+
+`q0` is the first question in encounter order; a batch of three is answered with `q0`, `q1`
+and `q2`. Raise from the handler instead of returning and you get the failure paths: an
+`httpx.ConnectError` is resent inside the retry budget, an `httpx.ReadTimeout` is not. For
+`AsyncGuide`, hand the same `httpx.MockTransport` to `async_transport(…)` and `build_async()`;
+it is both kinds of transport at once.
 
 ## Observability
 
@@ -341,16 +430,22 @@ and the value of `error.type` on the failed span.
 |---|---|---|
 | `AuthError` | `auth` | 401 |
 | `InvalidError` | `invalid` | 422; `.detail` is the body |
-| `RateLimitedError` | `rate_limited` | 429 after retries, or a `retry-after` too long to wait for |
-| `OverloadedError` | `overloaded` | 529 after retries |
+| `RateLimitedError` | `rate_limited` | 429 after retries, or a `retry-after` too long to wait for; `.retry_after` carries it |
+| `OverloadedError` | `overloaded` | 529 on the same terms; `.retry_after` carries it too |
 | `TransportError` | `transport` | connection, TLS, timeout |
 | `UnexpectedStatusError` | `unexpected_status` | anything the contract does not define |
 | `ProtocolError` | `protocol` | the response violates the contract: undecodable body, wrong answer kind, option or level not in the rubric, probability outside 0..1 |
 | `UnsureError` | `unsure` | the policy said unsure and nothing caught it |
 | `ConfigError` | `config` | raised where the mistake is written: bad thresholds, missing key, empty batch, unserialisable state, a duplicate rubric, a rubric outside 1..255 options or 2..10 levels, a bad `events(...)`, a non-positive timeout, negative retries or backoff, a `base_url` carrying credentials, and so on |
 
-Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and honour
-`retry-after`.
+Retries on 429 and 529 use exponential backoff with jitter, capped at 30 s, and honour an
+integer `retry-after`. They apply to `models()` as much as to `ask`.
+
+A failure that never reached a server is resent in the same budget: a refused connection, a
+reset, a TLS handshake that failed, a connect timeout. Nothing was judged, so nothing is
+repeated. A read timeout and a disconnect part-way through a response are **not** resent —
+the request arrived, the API may have answered it, and asking again would buy the same
+judgment twice. Those raise `TransportError` on the first failure.
 
 ## Lower layers
 
@@ -360,17 +455,19 @@ are not re-exported at the top level, and they are under the same rule as the fi
 nothing in them is removed or renamed without a major version and a `CHANGELOG.md` entry.
 Anything else in the package is private, whatever its name looks like.
 
-- `guideme.api` is the exact wire mirror of `POST /v1/systemone` and `GET /v1/models`.
-  `guideme.api.client` holds `Client` and `AsyncClient` for callers who want to build requests
-  themselves. They live one level down rather than on `guideme.api` because re-exporting them
-  would make `api` and `api.client` import each other, and the gate fails an import cycle.
-- `guideme.question.Question` is the type `noul`, `choose`, `choose_among`, `score`,
-  `score_levels` and every `.detail()` return. Inference covers most uses, so import it when
-  you need to annotate a question you are storing or passing on: a `dict` is invariant, so a
-  `dict[str, NoulQuestion]` is not a `dict[str, Question[bool]]` and the annotation has to be
-  written. It is out of `__all__` because the top-level surface is a fixed list, not because
-  the type is private. The promise covers that one name: everything else in `guideme.question`
-  is private.
+- `guideme.api` is the exact wire mirror of `POST /v1/systemone` and `GET /v1/models`, and
+  `guideme.api.__all__` is what it offers: the request and response models, `Usage`, and the
+  four adapters between them and the core. `guideme.api.client` holds `Client` and
+  `AsyncClient` for callers who want to build requests themselves. They live one level down
+  rather than on `guideme.api` because re-exporting them would make `api` and `api.client`
+  import each other, and the gate fails an import cycle.
+- `guideme.question` is where the question types are declared, and all of them are re-exported
+  above: `Question` is what `noul`, `choose`, `choose_among`, `score` and `score_levels`
+  return, and `NoulQuestion`, `ChoiceQuestion`, `ScoreQuestion`, `DetailedNoul`,
+  `DetailedChoice` and `DetailedScore` are the concrete ones. Inference covers most uses, so
+  reach for them when you need to annotate a question you are storing or passing on: a `dict`
+  is invariant, so a `dict[str, NoulQuestion]` is not a `dict[str, Question[bool]]` and the
+  annotation has to be written. Everything else in `guideme.question` is private.
 - The scalars are validated once and never re-checked: `Probability` and `Confidence` hold the
   unit-interval numbers on `Verdict`, `Ranked` and `Scored`, `Key` and `Rank` are what a runtime
   rubric answers with, `Model` names the model to ask, and `ApiKey` carries the key without ever

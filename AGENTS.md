@@ -8,16 +8,21 @@ A Python package that makes a TypeSafe Jev judgment usable as control flow: a ye
 `if`, a choice is an exhaustive `match`, a score is a comparison. One distribution, `guideme`,
 published to PyPI under `MIT OR Apache-2.0`. The public surface has two tiers:
 
-- the 35 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
+- the 44 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
 - `guideme.api` and `guideme.policy` as whole modules, imported by their own path and not
   re-exported at the top level: `guideme.api` is the wire mirror and `guideme.api.client`
   holds `Client` and `AsyncClient`, and `guideme.policy` holds `resolve`.
-- one name from a third module, `guideme.question.Question`: what every constructor in the
-  first tier returns, and the only way to write the type of a stored question down. The
-  promise covers that name and nothing else in `guideme.question` — `validate`, `Spec` and
-  the concrete question classes stay private, because a tier is a promise and this is the
-  narrowest one that lets a caller annotate. The README's **Lower layers** section documents
-  all of it.
+
+Every module that offers anything declares an `__all__`, and the list is what it owns rather
+than what it happens to have imported. `guideme/__init__.py` is the one exception to that
+reading, because it is a façade and every name in its list arrived by import;
+`tests/test_surface.py` therefore holds only `guideme.api` to the stricter rule, proving by
+AST that nothing it imported is re-exported. `guideme.question` no longer has a tier of its
+own: `Question`, the three question classes and the three detail classes are all in the top
+list now, because a caller annotating a stored question needed them and importing from a
+module the README called private to do it was the wrong answer. `validate`, `Spec` and the
+criteria shapes stay private, as do `render` and the `require_*` checks in `guideme.enums`
+despite their public-looking names. The README's **Lower layers** section documents all of it.
 
 Everything else in the package is private, whatever its name looks like.
 
@@ -43,19 +48,30 @@ two pages: `https://docs.typesafe.ai/api.md` covers `POST /v1/systemone` and
 | `src/guideme/enums.py` | `Choice`, `Levels`, `option`, `level`, `fallback`, and the internals `render` and the `require_*` checks | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there. `render` is the one place a rubric's examples become wire text, and its output is a cross-SDK contract item. `render`, `require_unshared_examples`, `require_no_counterexamples` and `require_no_fallback` are internal despite their names: they are imported by `question.py` and are in no tier, like `question.validate` |
 | `src/guideme/question.py` | question kinds, constructors, `Ranked`, `Scored`, the unsure ladder | a question is inert until asked; the reader travels with it |
 | `src/guideme/ask.py` | shapes: `encode`, `decode`, `Plan` | ids are `q0..qN` in encounter order, insertion order for a dict |
-| `src/guideme/_ask_overloads.py` | the typed `ask` surfaces | GENERATED; edit `scripts/gen_ask_overloads.py` and run `mise run gen` |
+| `src/guideme/receipt.py` | `Receipt` | its own module because the generated `ask` surfaces name it in a return type, so it has to sit below them |
+| `src/guideme/_ask_overloads.py` | the typed `ask` and `ask_with_receipt` surfaces | GENERATED; edit `scripts/gen_ask_overloads.py` and run `mise run gen` |
 | `src/guideme/telemetry.py` | every span, event, log record and attribute | the names are the contract, documented in `docs/observability.md`; installs no provider |
 | `src/guideme/api/__init__.py` | the wire mirror and the adapters to the core | mirrors `spec/schema/*.json` field for field; no policy here |
 | `src/guideme/api/client.py` | HTTP, retries, statuses to errors, one span per attempt | the only importer of `httpx`; every decision it makes is made by the pure `step` |
 | `src/guideme/guide.py` | `Guide`, `AsyncGuide`, `GuideBuilder`, `ModelInfo` | the two executors share `_prepare` and `_finish`; what is written twice is the two `await`s |
+
+`ModelInfo` copies the wire's `ModelEntry` into a plain value object so that `models()` never
+makes a caller name a pydantic type. `Receipt.usage` deliberately does **not** do that: it
+carries `guideme.api.Usage` itself. Two non-negative integers fixed by
+`spec/schema/response.json` do not earn a second name, `guideme.api` is a published tier
+already, and the cross-SDK parity table names the exported type `Usage`. The precedent is
+recorded here because the two cases look alike and the difference is a decision, not drift.
 | `spec/` | the vendored schemas and golden vectors | read-only here; it is `guideme-rust`'s output, and `mise run spec-check` proves this copy matches |
 
 Modules keep a one-way import graph, which `pyright`'s `reportImportCycles` enforces:
 `errors` imports nothing from the package; `_json` and `scalars` import `errors`; `policy`
 imports `errors` and `scalars`; `enums` imports `errors` and `policy`; `question` imports the
-above; `ask` imports `question`; `_ask_overloads` imports `_json` and `question`; `telemetry`
-imports `errors` and `policy`; `api` imports `question` and below; `api.client` imports `api`
-and `telemetry`. Nothing inside the package writes `from guideme import ...`: that would
+above; `ask` imports `question`; `telemetry` imports `errors` and `policy`; `api` imports
+`question` and below; `receipt` imports `api`; `_ask_overloads` imports `_json`, `question`
+and `receipt`; `api.client` imports `api` and `telemetry`. `receipt` sits where it does
+because `_ask_overloads` names `Receipt` in a return type and `guide` imports
+`_ask_overloads`, so the type cannot live in `guide`.
+Nothing inside the package writes `from guideme import ...`: that would
 import the package's own `__init__`, which imports the executors, which import `api`.
 
 `docs/design.md` records the decisions and the sharp edges. Update it when a decision changes.
@@ -185,7 +201,15 @@ is made in `guideme-rust` first, not here.
 
 ## Tests
 
-Few tests, high grade. The ceiling is 47 test functions; a parametrised function counts once.
+Few tests, high grade. The ceiling is 51 test functions; a parametrised function counts once.
+It was 47 before 0.2.0, which added four. Each one reaches something no existing function
+could: the counted connection pool needs two guides over one pool, which nothing else builds;
+the receipt needs the response's `model` and `usage` read back by a caller, where every other
+test reads them off a span; an injected transport answers with no server at all, and every
+other wire assertion is written against one; and the connection-failure retry needs a
+transport that fails on demand, which no local server can be made to do. Everything else 0.2.0
+added — the `529` carrying its `retry-after`, `GET /v1/models` being retried, and the five
+transport-and-timeout refusals — went into a parameter of a test that was already there.
 It was 40 before the logs signal, which is user-requested scope that the span assertions could
 not cover: correlation, severity and routing each need a record to look at. The forty-third is
 the pre-publish proof that a log sink which raises reaches neither the caller nor the ask span:
