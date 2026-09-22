@@ -85,6 +85,15 @@ def _an_examples_clause_written_empty() -> type[Choice]:
     return Empty
 
 
+def _an_empty_tuple_written_out() -> type[Choice]:
+    # `None` is how a clause is left out, so an empty sequence is always a clause
+    # written on purpose that says nothing -- whatever type the caller reached for.
+    class Empty(Choice):
+        a = option("Payments", counterexamples=())
+
+    return Empty
+
+
 def _a_blank_example() -> type[Choice]:
     class Blank(Choice):
         a = option("Payments", examples=["My card was charged twice", " "])
@@ -201,6 +210,7 @@ REFUSED: list[Callable[[], type[Choice] | type[Levels]]] = [
     _fallback_on_a_level,
     _a_blank_rubric,
     _an_examples_clause_written_empty,
+    _an_empty_tuple_written_out,
     _a_blank_example,
     _a_repeated_example,
     _a_counterexample_on_a_level,
@@ -220,6 +230,7 @@ REFUSED_IDS = [
     "a_fallback_marker_on_a_levels",
     "a_blank_rubric",
     "an_examples_clause_written_empty",
+    "an_empty_tuple_written_out",
     "a_blank_example",
     "a_repeated_example",
     "a_counterexample_on_a_level",

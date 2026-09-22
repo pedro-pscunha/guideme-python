@@ -165,8 +165,14 @@ Each module survives the test.
 - **A rubric's value is its bare text, examples or not.** `option("x", examples=[…])` still
   equals `"x"`, so two options whose text matches are still one member however their examples
   differ, and a member's `.value` still reads as it was written. The expansion happens only in
-  the request. That also means an `examples=[]` written out is a `ConfigError`: it cannot be
-  told from the default by its effect, so it is refused as the mistake it is.
+  the request.
+- **A clause left out is `None`; an empty one was written on purpose.** `examples` and
+  `counterexamples` default to `None`, which is how "there are none" is said, so any empty
+  sequence that arrives was typed by the caller and says nothing — a `ConfigError`, whatever
+  its type, `[]` and `()` alike. The alternative, defaulting to `()` and telling the two apart
+  by identity, would have rested on CPython interning the empty tuple: correct today, and
+  silently wrong on a runtime that does not, with a real caller mistake quietly no longer
+  caught. `is None` needs no such assumption.
 - **The four scalars are brands, not validated types.** `Probability`, `Confidence`, `Key` and
   `Rank` are `NewType`s, so `Probability(2.0)` and `Rank(99)` are accepted by the checker and by
   the interpreter alike. What makes them trustworthy is that only the wire mints them, and it

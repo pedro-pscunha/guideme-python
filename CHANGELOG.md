@@ -24,8 +24,9 @@ Additive. Nothing that worked in 0.1.0 sends different bytes.
   dropped by reaching a runtime constructor.
 - `level(…)` takes no counterexamples: "not this option" means nothing on an ordered scale. An
   `option(…)` carrying counterexamples written where a level belongs is a `ConfigError`, as is
-  a blank or whitespace-only rubric or entry, a repeat within one clause, and an `examples=[]`
-  written out.
+  a blank or whitespace-only rubric or entry, a repeat within one clause, and an empty clause
+  written out: `examples` and `counterexamples` default to `None`, so any empty sequence that
+  arrives was typed on purpose and says nothing.
 - Contradictory examples are a `ConfigError` too: one string as an example of two alternatives
   of the same question, or as both an example and a counterexample of the same alternative. One
   string as an example of one alternative and a counterexample of another stays legal — that is

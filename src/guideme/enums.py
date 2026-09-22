@@ -25,11 +25,6 @@ EXAMPLES = "Examples: "
 NOT_THIS = "Not this option: "
 """Opens the clause naming inputs that belong to some other option."""
 
-_UNSET: tuple[str, ...] = ()
-"""The `examples` and `counterexamples` default, and how an empty sequence written on
-purpose is told from an argument left out: CPython hands out one empty tuple, so the
-`examples=[]` this refuses is never this object."""
-
 
 @final
 class _Rubric(str):  # noqa: SLOT000 -- a str subclass may not carry non-empty __slots__
@@ -63,9 +58,13 @@ class _Rubric(str):  # noqa: SLOT000 -- a str subclass may not carry non-empty _
         return self
 
 
-def _items(what: str, items: Sequence[str], named: str) -> tuple[str, ...]:
-    """Check one clause's items: written means non-empty, each says something, no repeats."""
-    if items is _UNSET:
+def _items(what: str, items: Sequence[str] | None, named: str) -> tuple[str, ...]:
+    """Check one clause's items: written means non-empty, each says something, no repeats.
+
+    `None` is the clause left out. Anything else that is empty was written on purpose
+    and says nothing, which is the caller's mistake rather than a default.
+    """
+    if items is None:
         return ()
     if not items:
         detail = f"{what!r}: {named}= is empty; a clause written on purpose must say something"
@@ -83,8 +82,8 @@ def _items(what: str, items: Sequence[str], named: str) -> tuple[str, ...]:
 
 def _rubric(
     rubric: str,
-    examples: Sequence[str],
-    counterexamples: Sequence[str],
+    examples: Sequence[str] | None,
+    counterexamples: Sequence[str] | None,
     *,
     is_fallback: bool,
 ) -> str:
@@ -108,8 +107,8 @@ def _rubric(
 def option(
     rubric: str,
     *,
-    examples: Sequence[str] = _UNSET,
-    counterexamples: Sequence[str] = _UNSET,
+    examples: Sequence[str] | None = None,
+    counterexamples: Sequence[str] | None = None,
 ) -> str:
     """A described alternative: what it covers, inputs that belong to it, inputs that do not.
 
@@ -122,14 +121,15 @@ def option(
     written in. A string may be an example of one alternative and a counterexample of
     another: that is how two confusable ones are told apart.
 
-    A blank rubric or entry, an `examples=[]` written out, a repeat within one clause,
+    Leave a clause out to say there is none. An empty one written out says nothing and
+    is refused: a blank rubric or entry, an `examples=[]`, a repeat within one clause,
     and a string given as both an example and a counterexample of this one alternative
     are each a `ConfigError` where the option is written.
     """
     return _rubric(rubric, examples, counterexamples, is_fallback=False)
 
 
-def level(rubric: str, *, examples: Sequence[str] = _UNSET) -> str:
+def level(rubric: str, *, examples: Sequence[str] | None = None) -> str:
     """A score level: what it means, and inputs that score here.
 
     An example listed under a level is the statement that such an input scores that
@@ -137,14 +137,14 @@ def level(rubric: str, *, examples: Sequence[str] = _UNSET) -> str:
     counterexamples: "not this option" means nothing on an ordered scale, so the
     level below or above is what an input that does not belong here scores.
     """
-    return _rubric(rubric, examples, _UNSET, is_fallback=False)
+    return _rubric(rubric, examples, None, is_fallback=False)
 
 
 def fallback(
     rubric: str,
     *,
-    examples: Sequence[str] = _UNSET,
-    counterexamples: Sequence[str] = _UNSET,
+    examples: Sequence[str] | None = None,
+    counterexamples: Sequence[str] | None = None,
 ) -> str:
     """Mark the member to use when the policy says unsure. At most one per `Choice`.
 

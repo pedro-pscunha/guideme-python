@@ -154,9 +154,10 @@ option, says an input belongs where it cannot, so each is refused.
 `level(…)` has no counterexamples, because "not this option" means nothing on an ordered
 scale — an input that does not belong at one level scores at another.
 
-A blank or whitespace-only rubric or entry, a repeat within one clause, an `examples=[]`
-written out, a counterexample on a level, and the two contradictions above are each a
-`ConfigError` where the rubric is written.
+Leave a clause out to say there is none. An empty one written out — `examples=[]` or
+`examples=()` — says nothing, so it is refused as the mistake it is, along with a blank or
+whitespace-only rubric or entry, a repeat within one clause, a counterexample on a level, and
+the two contradictions above. Each is a `ConfigError` where the rubric is written.
 
 The state is anything JSON-shaped: a text literal, a `dict`, a list of them. A dataclass goes
 through `dataclasses.asdict`, a pydantic model through `.model_dump()`.

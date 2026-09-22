@@ -119,7 +119,8 @@ the rest are checked in review.
   so is the order: examples and counterexamples render in the order written, never sorted and
   never de-duplicated into a set.
 - **A rubric's examples must be consistent, and that is checked where it is written.** A blank
-  or whitespace-only rubric or entry, a repeat within one clause, an `examples=[]` written out,
+  or whitespace-only rubric or entry, a repeat within one clause, an empty clause written out
+  (`examples` and `counterexamples` default to `None`, so any empty sequence was typed),
   and a counterexample on a level are each a `ConfigError`. So are the two contradictions: one
   string as an example of two alternatives of the same question, and one string as both an
   example and a counterexample of the same alternative. One string as an example of one
