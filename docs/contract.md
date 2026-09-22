@@ -16,6 +16,16 @@ every one of which is a parametrised case of `tests/test_policy_vectors.py`: an 
 and another SDK is either a bug here or an ambiguity to resolve upstream; it is never fixed by
 changing the copy.
 
+The rendered rubric string is a contract item too. An option or a level written with
+`option(…)`, `level(…)` or `fallback(…)` carries its examples beside its text, and the string
+those compose into — clauses joined with a newline, items within one joined with `"; "`, the
+text verbatim, and the text alone when there are no examples — is what goes on the wire. Every
+guideme SDK composes the same string from the same parts, and `spec/vectors/rubric.json` is
+where the renderers are held to each other. One asymmetry is deliberate: `choose_among` and
+`score_levels` here take an `option(…)` or a `level(…)` value, while Rust's equivalents take a
+string its derive macro has already composed, because that is where Rust's renderer lives.
+Equivalent inputs put identical bytes on the wire.
+
 Drift is caught rather than trusted. `mise run spec-check` clones guideme-rust, diffs its `spec/`
 against this one and fails on any difference except `spec/SOURCE`, which is provenance and has
 no counterpart upstream. It runs on every pull request as the `spec-drift` job of

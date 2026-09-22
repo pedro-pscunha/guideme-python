@@ -97,6 +97,29 @@ Each module survives the test.
   an error span status rather than an error-level record. Anything without a convention is
   namespaced `guideme.`. The package depends on `opentelemetry-api` only and installs no
   provider; `docs/observability.md` shows the exporter side.
+- **A rubric's examples are flattened into its text, not sent as structured criteria.** The
+  TypeSafe API takes structured `criteria`, and `docs.typesafe.ai/primitives/choice.md`
+  documents exactly the `what` / `not_for` / `examples` object this surface wants. It is not
+  used, for three measured reasons. A score answer echoes its criteria back in `legend`, which
+  is `dict[str, str]` here and `BTreeMap<u8, String>` in Rust; object criteria come back as
+  objects and fail to parse, so sending them means a breaking change to a public type — in a
+  field neither SDK reads beyond its length. Flattening is as good: on the docs' own worked
+  example, flattened scored 1.01 against structured's 1.03 at a higher confidence, and on an
+  ambiguous choice both reached the option that bare strings miss, inside run-to-run variance.
+  And flattening is cheaper: identical content billed 400 input tokens flattened against 450
+  structured. The gain comes from the examples being present, not from the JSON shape. So
+  `option(…)`, `level(…)` and `fallback(…)` carry the parts on a `str` subclass and `render`
+  composes them where the rubric becomes wire text — the wire schema, `spec/`, and every
+  existing golden vector untouched.
+- **The rendered rubric is a contract item, and the renderer has one entry per wire site.**
+  Clauses join with a newline and items with `"; "`, and the text is used verbatim: a newline
+  rather than a space is what removes the need for a punctuation rule, since an example ending
+  in `?` would otherwise render as `Where is my refund?.`. `Choice.rubric()`, `Levels.levels()`,
+  `choose_among` and `score_levels` all render, so a value that reached a runtime constructor
+  cannot silently lose its examples. Rust renders the same string inside its derive macro,
+  which is the one deliberate asymmetry: `choose_among` here takes an `option(…)`, while Rust's
+  equivalent takes a string the macro already composed. Equivalent inputs put identical bytes
+  on the wire.
 - **An answer is a span event and a log record, and the caller picks.** Rust emits one
   `tracing` event and lets the subscriber fan it out, so its example filters events off the
   span exporter to store each one once. There is no subscriber here, so the library makes both
@@ -123,6 +146,11 @@ Each module survives the test.
   statement, naming the members that repeat.
 - **`Key` and `Rank`** are only meaningful through `choose_among` and `score_levels`. They are
   `NewType`s over `str` and `int`, so nothing else hands you one.
+- **A rubric's value is its bare text, examples or not.** `option("x", examples=[…])` still
+  equals `"x"`, so two options whose text matches are still one member however their examples
+  differ, and a member's `.value` still reads as it was written. The expansion happens only in
+  the request. That also means an `examples=[]` written out is a `ConfigError`: it cannot be
+  told from the default by its effect, so it is refused as the mistake it is.
 - **The four scalars are brands, not validated types.** `Probability`, `Confidence`, `Key` and
   `Rank` are `NewType`s, so `Probability(2.0)` and `Rank(99)` are accepted by the checker and by
   the interpreter alike. What makes them trustworthy is that only the wire mints them, and it

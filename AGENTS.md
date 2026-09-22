@@ -8,7 +8,7 @@ A Python package that makes a TypeSafe Jev judgment usable as control flow: a ye
 `if`, a choice is an exhaustive `match`, a score is a comparison. One distribution, `guideme`,
 published to PyPI under `MIT OR Apache-2.0`. The public surface has two tiers:
 
-- the 33 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
+- the 35 names in `__all__` in `src/guideme/__init__.py`, imported from `guideme` itself;
 - `guideme.api` and `guideme.policy` as whole modules, imported by their own path and not
   re-exported at the top level: `guideme.api` is the wire mirror and `guideme.api.client`
   holds `Client` and `AsyncClient`, and `guideme.policy` holds `resolve`.
@@ -40,7 +40,7 @@ two pages: `https://docs.typesafe.ai/api.md` covers `POST /v1/systemone` and
 | `src/guideme/scalars.py` | `Probability`, `Confidence`, `Key`, `Rank`, `ApiKey`, `Model` | validation happens once, here; `ApiKey` never prints |
 | `src/guideme/errors.py` | the `GuidemeError` tree and `kind` | `kind` is the cross-SDK name and the `error.type` value; imports nothing from `guideme` |
 | `src/guideme/policy.py` | `resolve`, `Policy`, `Thresholds`, `Verdict`, the answer and outcome dataclasses | pure: no I/O, no caller enums, keys and level indices only |
-| `src/guideme/enums.py` | `Choice`, `Levels`, `fallback` | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there |
+| `src/guideme/enums.py` | `Choice`, `Levels`, `option`, `level`, `fallback`, `render` | a member's name is its wire key and its value is its rubric; both validate at class definition, and a repeated rubric text is refused there. `render` is the one place a rubric's examples become wire text, and its output is a cross-SDK contract item |
 | `src/guideme/question.py` | question kinds, constructors, `Ranked`, `Scored`, the unsure ladder | a question is inert until asked; the reader travels with it |
 | `src/guideme/ask.py` | shapes: `encode`, `decode`, `Plan` | ids are `q0..qN` in encounter order, insertion order for a dict |
 | `src/guideme/_ask_overloads.py` | the typed `ask` surfaces | GENERATED; edit `scripts/gen_ask_overloads.py` and run `mise run gen` |
@@ -106,6 +106,16 @@ the rest are checked in review.
   is a `ConfigError` on the class statement; so is `fallback(…)` on a `Levels`, which has
   `.otherwise(level)` instead. Both fire where the enum is written, like the Rust derive's
   compile errors.
+- **A rubric's examples are composed into its text at the wire, and nowhere else.** A rubric's
+  value stays the bare text; `enums.render` is what turns an `option(…)`, `level(…)` or
+  `fallback(…)` into what the model reads, and every site that puts a rubric on the wire —
+  `Choice.rubric()`, `Levels.levels()`, `choose_among`, `score_levels` — goes through it, so a
+  rubric cannot arrive having quietly lost what it carries. A bare string and a rubric with no
+  examples render to their own bytes, so an existing caller's request does not move. The
+  rendered string is a contract item shared with every other SDK, stated in `docs/contract.md`
+  and pinned by `spec/vectors/rubric.json`. A blank rubric, a blank or repeated example, an
+  `examples=[]` written out, and a counterexample on a level are each a `ConfigError` where the
+  rubric is written.
 - **Nothing outside `api/` may see a `pydantic` exception.** A caller's state or instructions
   that pydantic refuses leaves `api/` as a `ConfigError`, and a `NaN` or an infinity is refused
   rather than serialised as `null`.
@@ -159,13 +169,17 @@ is made in `guideme-rust` first, not here.
 
 ## Tests
 
-Few tests, high grade. The ceiling is 43 test functions; a parametrised function counts once.
+Few tests, high grade. The ceiling is 47 test functions; a parametrised function counts once.
 It was 40 before the logs signal, which is user-requested scope that the span assertions could
 not cover: correlation, severity and routing each need a record to look at. The forty-third is
 the pre-publish proof that a log sink which raises reaches neither the caller nor the ask span:
 it asserts the absence of a failure on a path where every other test asserts a presence, so no
-existing test could carry it. Everything else that pass added went into a parameter of a test
-that was already there. A new test must be one of:
+existing test could carry it. Rubric examples added the last four, also user-requested scope:
+the golden rendering table, the passthrough property that proves 0.1.0's bytes have not moved,
+the wire proof that a rendered rubric reaches the request, and a live proof that examples move
+the distribution. Each asserts a different thing about a string no existing test looks at.
+Everything else those two passes added went into a parameter of a test that was already there.
+A new test must be one of:
 
 - a property test (`hypothesis`) over a law of `policy.resolve`, the shapes, or the wire types;
 - a wire or contract check through a real local HTTP server (`pytest-httpserver`), asserting on

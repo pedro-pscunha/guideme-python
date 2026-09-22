@@ -104,6 +104,51 @@ A noul can carry `.criteria("what yes means", "what no means")`. Instructions ac
 or any JSON-shaped value, so a question can reference structured data by field name the way
 the TypeSafe docs describe.
 
+### Examples in a rubric
+
+Two options that read alike are told apart by showing inputs rather than by describing harder.
+`option(…)` takes the inputs that belong to an option and the ones that belong somewhere else,
+`level(…)` takes the inputs that score at that level, and `fallback(…)` is an `option(…)` that
+also marks the unsure member.
+
+```python
+from guideme import Choice, Levels, fallback, level, option
+
+
+class Department(Choice):
+    billing = option(
+        "Payments, invoicing, refunds",
+        examples=["My card was charged twice", "Where is my refund?"],
+        counterexamples=["The dashboard is down"],
+    )
+    technical = option("Bugs, outages, integrations", examples=["502 on every request"])
+    sales = fallback("Pricing, upgrades, new accounts", examples=["Do you have a team plan?"])
+
+
+class Severity(Levels):
+    cosmetic = level("No impact to functionality", examples=["typo in a label"])
+    degraded = level("Broken feature, workaround exists", examples=["export fails in one browser"])
+    blocking = level("No workaround exists", examples=["cannot log in", "data loss"])
+```
+
+The member's value is still the bare rubric; the examples are composed into it only in the
+request, as
+
+```text
+Payments, invoicing, refunds
+Examples: My card was charged twice; Where is my refund?
+Not this option: The dashboard is down
+```
+
+So a rubric with no examples sends exactly what it sent before, and the same strings work in
+`choose_among("…", {"billing": option(…)})` and `score_levels("…", [level(…), …])`. A string
+may be an example of one option and a counterexample of another: that is the point when two
+options are confusable. `level(…)` has no counterexamples, because "not this option" means
+nothing on an ordered scale — an input that does not belong at one level scores at another.
+
+A blank rubric, a blank or repeated example, an `examples=[]` written out, and a counterexample
+on a level are each a `ConfigError` where the rubric is written.
+
 The state is anything JSON-shaped: a text literal, a `dict`, a list of them. A dataclass goes
 through `dataclasses.asdict`, a pydantic model through `.model_dump()`.
 
