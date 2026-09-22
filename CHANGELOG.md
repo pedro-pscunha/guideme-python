@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.1.1 — 2026-09-22
+
 Additive. Nothing that worked in 0.1.0 sends different bytes.
 
 - `option(rubric, examples=…, counterexamples=…)` and `level(rubric, examples=…)` join
