@@ -1,5 +1,6 @@
 import copy
 import pickle
+from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -11,11 +12,15 @@ from guideme.enums import render
 
 from .conftest import (
     JSON,
+    REPO_ROOT,
     TICKET,
     Json,
     Runner,
+    as_list,
     as_object,
+    as_str,
     expect_post,
+    load_json,
     narrow,
     reply,
     validator,
@@ -27,69 +32,55 @@ BILLING = "Payments, invoicing, refunds"
 TECHNICAL = "Bugs, outages, integrations"
 COSMETIC = "No impact to functionality"
 
-# The golden table of the cross-SDK design: the inputs, and the exact bytes both SDKs
-# render them to. `guideme-rust` reproduces this table from its derive macro, and
-# spec/vectors/rubric.json is where the two are held to each other.
-GOLDEN: list[tuple[str, str, str]] = [
-    (option(BILLING), BILLING, BILLING),
-    (
-        option(TECHNICAL, examples=["502 on every request"]),
-        TECHNICAL,
-        f"{TECHNICAL}\nExamples: 502 on every request",
-    ),
-    (
-        option(BILLING, examples=["My card was charged twice", "Where is my refund?"]),
-        BILLING,
-        f"{BILLING}\nExamples: My card was charged twice; Where is my refund?",
-    ),
-    (
-        option(
-            BILLING,
-            examples=["My card was charged twice"],
-            counterexamples=["The dashboard is down"],
-        ),
-        BILLING,
-        f"{BILLING}\nExamples: My card was charged twice\nNot this option: The dashboard is down",
-    ),
-    (
-        option(BILLING, counterexamples=["The dashboard is down"]),
-        BILLING,
-        f"{BILLING}\nNot this option: The dashboard is down",
-    ),
-    (
-        level(COSMETIC, examples=["typo in a label", "misaligned icon"]),
-        COSMETIC,
-        f"{COSMETIC}\nExamples: typo in a label; misaligned icon",
-    ),
-    # Both clauses are written out of alphabetical order, so a renderer that sorted or
-    # took a set would fail here. Declaration order is contract: two SDKs ordering
-    # differently would send different bytes for the same declaration.
-    (
-        option(
-            BILLING,
-            examples=["Where is my refund?", "My card was charged twice"],
-            counterexamples=["The dashboard is down", "A 502 on every request"],
-        ),
-        BILLING,
-        (
-            f"{BILLING}\nExamples: Where is my refund?; My card was charged twice"
-            f"\nNot this option: The dashboard is down; A 502 on every request"
-        ),
-    ),
-]
-
-GOLDEN_IDS = [
-    "no_parts",
-    "one_example",
-    "two_examples",
-    "examples_and_a_counterexample",
-    "a_counterexample_only",
-    "a_level_with_examples",
-    "declaration_order_is_kept",
-]
+VECTOR_PATH = REPO_ROOT / "spec" / "vectors" / "rubric.json"
 
 
-@pytest.mark.parametrize(("rubric", "bare", "expected"), GOLDEN, ids=GOLDEN_IDS)
+def _declared(raw: Json) -> tuple[str, str, str]:
+    """One vector case as the rubric it declares, its bare text, and its expected bytes.
+
+    `kind` is what picks the constructor, which is what that field is for: a `levels`
+    case has to go through `level(...)`, and a `choice` or `noul` case through
+    `option(...)`, so the vector exercises the constructors a caller writes rather than
+    `render` alone.
+
+    An absent clause arrives as `[]` because that is how the generator serialises an
+    empty `Vec`, and it is mapped back to "no argument". Passing `[]` through would be
+    a different declaration: these constructors refuse an empty clause written out.
+    """
+    case = as_object(raw)
+    what = as_str(case["what"])
+    examples = [as_str(item) for item in as_list(case["examples"])] or None
+    counterexamples = [as_str(item) for item in as_list(case["counterexamples"])] or None
+    kind = as_str(case["kind"])
+    if kind == "levels":
+        declared = level(what, examples=examples)
+    elif kind in {"choice", "noul"}:
+        declared = option(what, examples=examples, counterexamples=counterexamples)
+    else:
+        message = f"{VECTOR_PATH}: unknown kind {kind!r}"
+        raise AssertionError(message)
+    return declared, what, as_str(case["rendered"])
+
+
+def _cases(path: Path) -> list[Json]:
+    """The vector's cases, refusing an empty file.
+
+    An empty parametrisation is a test that passes without ever running, so a vector
+    that arrived empty would silence the drift this file exists to catch.
+    """
+    cases = as_list(load_json(path))
+    if not cases:
+        message = f"{path} carries no cases"
+        raise AssertionError(message)
+    return cases
+
+
+CASES = _cases(VECTOR_PATH)
+VECTOR = [_declared(raw) for raw in CASES]
+VECTOR_IDS = [f"{index}_{as_str(as_object(raw)['kind'])}" for index, raw in enumerate(CASES)]
+
+
+@pytest.mark.parametrize(("rubric", "bare", "expected"), VECTOR, ids=VECTOR_IDS)
 def test_a_rubric_renders_the_bytes_the_contract_names(
     rubric: str, bare: str, expected: str
 ) -> None:

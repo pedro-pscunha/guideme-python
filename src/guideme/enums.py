@@ -104,9 +104,9 @@ def _items(what: str, items: Sequence[str] | None, named: str) -> tuple[str, ...
     broken = [item for item in values if "\n" in item or "\r" in item]
     if broken:
         detail = (
-            f"{what!r}: {named[:-1]} {broken[0]!r} contains a line break; items are joined "
-            f"with '; ' onto one line, and a newline in one would read as a clause the "
-            f"rubric never declared"
+            f"{what!r}: {named[:-1]} {broken[0]!r} may not contain a line break "
+            f"(U+000A or U+000D); items are joined with '; ' onto one line, and a newline "
+            f"in one would read as a clause the rubric never declared"
         )
         raise ConfigError(detail)
     seen: set[str] = set()

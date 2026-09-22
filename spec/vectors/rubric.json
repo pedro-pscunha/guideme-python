@@ -1,0 +1,96 @@
+[
+  {
+    "kind": "choice",
+    "what": "Payments, invoicing, refunds",
+    "examples": [],
+    "counterexamples": [],
+    "rendered": "Payments, invoicing, refunds"
+  },
+  {
+    "kind": "choice",
+    "what": "Bugs, outages, integrations",
+    "examples": [
+      "502 on every request"
+    ],
+    "counterexamples": [],
+    "rendered": "Bugs, outages, integrations\nExamples: 502 on every request"
+  },
+  {
+    "kind": "choice",
+    "what": "Payments, invoicing, refunds",
+    "examples": [
+      "My card was charged twice",
+      "Where is my refund?"
+    ],
+    "counterexamples": [],
+    "rendered": "Payments, invoicing, refunds\nExamples: My card was charged twice; Where is my refund?"
+  },
+  {
+    "kind": "choice",
+    "what": "Payments, invoicing, refunds",
+    "examples": [
+      "My card was charged twice"
+    ],
+    "counterexamples": [
+      "The dashboard is down"
+    ],
+    "rendered": "Payments, invoicing, refunds\nExamples: My card was charged twice\nNot this option: The dashboard is down"
+  },
+  {
+    "kind": "choice",
+    "what": "Payments, invoicing, refunds",
+    "examples": [],
+    "counterexamples": [
+      "The dashboard is down"
+    ],
+    "rendered": "Payments, invoicing, refunds\nNot this option: The dashboard is down"
+  },
+  {
+    "kind": "choice",
+    "what": "Payments, invoicing, refunds",
+    "examples": [
+      "Why was I billed twice?",
+      "Cancel and refund me"
+    ],
+    "counterexamples": [
+      "The status page is red",
+      "Are you hiring?"
+    ],
+    "rendered": "Payments, invoicing, refunds\nExamples: Why was I billed twice?; Cancel and refund me\nNot this option: The status page is red; Are you hiring?"
+  },
+  {
+    "kind": "levels",
+    "what": "No impact to functionality",
+    "examples": [
+      "typo in a label",
+      "misaligned icon"
+    ],
+    "counterexamples": [],
+    "rendered": "No impact to functionality\nExamples: typo in a label; misaligned icon"
+  },
+  {
+    "kind": "levels",
+    "what": "No workaround exists",
+    "examples": [],
+    "counterexamples": [],
+    "rendered": "No workaround exists"
+  },
+  {
+    "kind": "noul",
+    "what": "Something is broken now and nobody can work around it",
+    "examples": [
+      "the checkout page is down"
+    ],
+    "counterexamples": [
+      "a nightly job failed and the numbers are pulled by hand for now"
+    ],
+    "rendered": "Something is broken now and nobody can work around it\nExamples: the checkout page is down\nNot this option: a nightly job failed and the numbers are pulled by hand for now"
+  },
+  {
+    "kind": "noul",
+    "what": "It can wait for the next working day",
+    "examples": [],
+    "counterexamples": [],
+    "rendered": "It can wait for the next working day"
+  }
+]
