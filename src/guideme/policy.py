@@ -12,6 +12,25 @@ from typing import Literal, final
 from guideme.errors import ConfigError, ProtocolError
 from guideme.scalars import Confidence, Probability
 
+__all__ = [
+    "Answer",
+    "ChoiceAnswer",
+    "ChoiceOutcome",
+    "NoulAnswer",
+    "NoulOutcome",
+    "Outcome",
+    "Policy",
+    "ScoreAnswer",
+    "ScoreOutcome",
+    "Thresholds",
+    "Verdict",
+    "VerdictLabel",
+    "resolve",
+]
+"""What this module offers, which is the second tier: `guideme.policy` is imported by
+its own path rather than re-exported. `resolve` and the shapes it reads and returns are
+the whole of it; the bounds constants beside them are the package's own."""
+
 MAX_OPTIONS = 255
 """Most options a choice may carry."""
 

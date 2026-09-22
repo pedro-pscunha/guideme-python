@@ -10,6 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast, final
 
+import httpx
 import pytest
 from hypothesis import HealthCheck, settings
 from jsonschema import Draft202012Validator
@@ -24,7 +25,7 @@ from pydantic import TypeAdapter
 from pytest_httpserver import HTTPServer
 from pytest_httpserver.httpserver import RequestHandler
 
-from guideme import ApiKey, AsyncGuide, Guide, GuideBuilder, telemetry
+from guideme import ApiKey, AsyncGuide, Guide, GuideBuilder, Receipt, telemetry
 from guideme._json import Json
 from guideme.api import Answer as WireAnswer
 from guideme.api import answer_from_wire
@@ -35,6 +36,7 @@ from guideme.policy import (
     ChoiceOutcome,
     NoulOutcome,
     Outcome,
+    Policy,
     ScoreOutcome,
 )
 from guideme.question import choose_among, noul, score_levels
@@ -240,6 +242,13 @@ ASYNC: Kind = "async"
 type Configure = Callable[[GuideBuilder], GuideBuilder]
 """A test's extra builder settings, applied after the ones every test shares."""
 
+type Handler = Callable[[httpx.Request], httpx.Response]
+"""What an injected `httpx.MockTransport` answers one request with.
+
+A handler may raise instead, which is how a test reaches the connection failures no
+local server can produce on demand.
+"""
+
 
 def kind_of(param: object) -> Kind:
     """Narrow a fixture parameter to a kind. Anything else is a failure, never a default."""
@@ -301,6 +310,18 @@ def async_entry(guide: AsyncGuide) -> Callable[[object, Json], Awaitable[object]
     return cast("Callable[[object, Json], Awaitable[object]]", guide.ask)
 
 
+def _receipt_entry(guide: Guide) -> Callable[[object, Json], Receipt[object]]:
+    """`Guide.ask_with_receipt`, widened for the same reason as `_entry`."""
+    return cast("Callable[[object, Json], Receipt[object]]", guide.ask_with_receipt)
+
+
+def _async_receipt_entry(
+    guide: AsyncGuide,
+) -> Callable[[object, Json], Awaitable[Receipt[object]]]:
+    """`AsyncGuide.ask_with_receipt`, widened for the same reason as `_entry`."""
+    return cast("Callable[[object, Json], Awaitable[Receipt[object]]]", guide.ask_with_receipt)
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class Runner:
@@ -333,18 +354,70 @@ class Runner:
         finally:
             await guide.close()
 
-    def models(self) -> tuple[ModelInfo, ...]:
+    def offline(self, shape: object, state: Json, handler: Handler) -> object:
+        """Ask through a caller-supplied transport: no server, no socket, no port.
+
+        Which setter carries it is the one thing the two kinds cannot share, because a
+        builder refuses to build a guide of one kind from the other kind's transport.
+        """
+        transport = httpx.MockTransport(handler)
+        if self.kind == SYNC:
+            with self._builder(lambda builder: builder.transport(transport)).build() as guide:
+                return _entry(guide)(shape, state)
+        return asyncio.run(self._offline_async(shape, state, transport))
+
+    async def _offline_async(
+        self, shape: object, state: Json, transport: httpx.MockTransport
+    ) -> object:
+        def settle(builder: GuideBuilder) -> GuideBuilder:
+            return builder.async_transport(transport)
+
+        async with self._builder(settle).build_async() as guide:
+            return await async_entry(guide)(shape, state)
+
+    def receipt(self, shape: object, state: Json) -> Receipt[object]:
+        """Ask `shape` about `state` and return the whole receipt, not only the answer."""
+        if self.kind == SYNC:
+            with self._builder(None).build() as guide:
+                return _receipt_entry(guide)(shape, state)
+        return asyncio.run(self._receipt_async(shape, state))
+
+    async def _receipt_async(self, shape: object, state: Json) -> Receipt[object]:
+        async with self._builder(None).build_async() as guide:
+            return await _async_receipt_entry(guide)(shape, state)
+
+    def paired(self, shape: object, state: Json) -> list[object]:
+        """Ask through a derived guide, then through the guide it was derived from.
+
+        Both guides are entered as context managers and the derived one leaves its block
+        first, so the second ask happens only if closing a derived guide left the pool
+        the two of them share open.
+        """
+        if self.kind == SYNC:
+            with self._builder(None).build() as guide:
+                with guide.with_policy(Policy()) as derived:
+                    first = _entry(derived)(shape, state)
+                return [first, _entry(guide)(shape, state)]
+        return asyncio.run(self._paired_async(shape, state))
+
+    async def _paired_async(self, shape: object, state: Json) -> list[object]:
+        async with self._builder(None).build_async() as guide:
+            async with guide.with_policy(Policy()) as derived:
+                first = await async_entry(derived)(shape, state)
+            return [first, await async_entry(guide)(shape, state)]
+
+    def models(self, configure: Configure | None = None) -> tuple[ModelInfo, ...]:
         """`GET /v1/models` through this kind's executor."""
         if self.kind == SYNC:
-            guide = self._builder(None).build()
+            guide = self._builder(configure).build()
             try:
                 return guide.models()
             finally:
                 guide.close()
-        return asyncio.run(self._models_async())
+        return asyncio.run(self._models_async(configure))
 
-    async def _models_async(self) -> tuple[ModelInfo, ...]:
-        guide = self._builder(None).build_async()
+    async def _models_async(self, configure: Configure | None) -> tuple[ModelInfo, ...]:
+        guide = self._builder(configure).build_async()
         try:
             return await guide.models()
         finally:

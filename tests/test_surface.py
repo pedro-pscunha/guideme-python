@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 import guideme
+from guideme import api
 
 from .conftest import REPO_ROOT
 
@@ -12,8 +13,12 @@ DOCUMENTED = frozenset(
         "AsyncGuide",
         "AuthError",
         "Choice",
+        "ChoiceQuestion",
         "Confidence",
         "ConfigError",
+        "DetailedChoice",
+        "DetailedNoul",
+        "DetailedScore",
         "Guide",
         "GuideBuilder",
         "GuidemeError",
@@ -22,18 +27,23 @@ DOCUMENTED = frozenset(
         "Levels",
         "Model",
         "ModelInfo",
+        "NoulQuestion",
         "OverloadedError",
         "Policy",
         "Probability",
         "ProtocolError",
+        "Question",
         "Rank",
         "Ranked",
         "RateLimitedError",
+        "Receipt",
+        "ScoreQuestion",
         "Scored",
         "Thresholds",
         "TransportError",
         "UnexpectedStatusError",
         "UnsureError",
+        "Usage",
         "Verdict",
         "choose",
         "choose_among",
@@ -66,6 +76,15 @@ def _imports(path: Path) -> set[str]:
     return found
 
 
+def _bound_by_import(path: Path) -> set[str]:
+    """Every name a module got by importing it, under whatever alias it was bound to."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            found.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+    return found
+
+
 def test_public_surface_is_exactly_the_documented_list() -> None:
     assert set(guideme.__all__) == DOCUMENTED
     assert list(guideme.__all__) == sorted(guideme.__all__)
@@ -78,6 +97,15 @@ def test_public_surface_is_exactly_the_documented_list() -> None:
     prose = README.read_text(encoding="utf-8")
     code = "\n".join(re.findall(r"`{1,3}[^`]+`{1,3}", prose, re.DOTALL))
     assert not [name for name in guideme.__all__ if name not in code]
+
+    # The second tier, `guideme.api`, is a module a caller imports by its own path, so
+    # what it re-exports is a promise too. It owns every name it offers: a list carrying
+    # `BaseModel` or `Mapping` would make pydantic's surface and the standard library's
+    # look like this package's, and a reader could not tell the mirror from what the
+    # mirror is built out of.
+    assert list(api.__all__) == sorted(api.__all__)
+    assert all(hasattr(api, name) for name in api.__all__)
+    assert not set(api.__all__) & _bound_by_import(PACKAGE / "api" / "__init__.py")
 
 
 def test_httpx_and_pydantic_stay_behind_the_api_package() -> None:

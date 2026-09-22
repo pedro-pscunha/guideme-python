@@ -33,6 +33,30 @@ from guideme.policy import (
 )
 from guideme.scalars import Confidence, Key, Probability, Rank
 
+__all__ = [
+    "ChoiceQuestion",
+    "DetailedChoice",
+    "DetailedNoul",
+    "DetailedScore",
+    "NoulQuestion",
+    "Question",
+    "Ranked",
+    "ScoreQuestion",
+    "Scored",
+    "choose",
+    "choose_among",
+    "noul",
+    "score",
+    "score_levels",
+]
+"""What this module offers a caller, all of it re-exported from `guideme` itself.
+
+`validate`, `Spec` and the criteria shapes are left out on purpose: they are how the
+package carries a question, not how anyone writes one. `Question` is the exception the
+`guideme.question` tier exists for, because it is the only way to write down the type
+of a stored question.
+"""
+
 
 @final
 @dataclass(frozen=True, slots=True)

@@ -16,6 +16,15 @@ from typing import Self, final
 from guideme.errors import ConfigError
 from guideme.policy import MAX_LEVELS, MAX_OPTIONS, MIN_LEVELS
 
+__all__ = ["Choice", "Levels", "fallback", "level", "option"]
+"""What this module offers a caller, all of it re-exported from `guideme` itself.
+
+`render`, `require_unshared_examples`, `require_no_counterexamples` and
+`require_no_fallback` are internal despite their names: `guideme.question` imports them
+and no caller ever does. They are in no tier, and leaving them out of this list is what
+says so.
+"""
+
 MIN_OPTIONS = 1
 """Fewest options a choice may carry."""
 

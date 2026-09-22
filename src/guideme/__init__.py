@@ -1,5 +1,6 @@
 """Type-safe inline judgments from TypeSafe Jev."""
 
+from guideme.api import Usage
 from guideme.enums import Choice, Levels, fallback, level, option
 from guideme.errors import (
     AuthError,
@@ -16,14 +17,22 @@ from guideme.errors import (
 from guideme.guide import AsyncGuide, Guide, GuideBuilder, ModelInfo
 from guideme.policy import Policy, Thresholds, Verdict
 from guideme.question import (
+    ChoiceQuestion,
+    DetailedChoice,
+    DetailedNoul,
+    DetailedScore,
+    NoulQuestion,
+    Question,
     Ranked,
     Scored,
+    ScoreQuestion,
     choose,
     choose_among,
     noul,
     score,
     score_levels,
 )
+from guideme.receipt import Receipt
 from guideme.scalars import ApiKey, Confidence, Key, Model, Probability, Rank
 
 __all__ = [
@@ -31,8 +40,12 @@ __all__ = [
     "AsyncGuide",
     "AuthError",
     "Choice",
+    "ChoiceQuestion",
     "Confidence",
     "ConfigError",
+    "DetailedChoice",
+    "DetailedNoul",
+    "DetailedScore",
     "Guide",
     "GuideBuilder",
     "GuidemeError",
@@ -41,18 +54,23 @@ __all__ = [
     "Levels",
     "Model",
     "ModelInfo",
+    "NoulQuestion",
     "OverloadedError",
     "Policy",
     "Probability",
     "ProtocolError",
+    "Question",
     "Rank",
     "Ranked",
     "RateLimitedError",
+    "Receipt",
+    "ScoreQuestion",
     "Scored",
     "Thresholds",
     "TransportError",
     "UnexpectedStatusError",
     "UnsureError",
+    "Usage",
     "Verdict",
     "choose",
     "choose_among",

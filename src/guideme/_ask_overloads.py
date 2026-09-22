@@ -2,10 +2,14 @@
 
 Every shape whose types `ask` carries through is written out as an overload,
 because Python cannot map a type over a tuple. Any nesting still works at
-runtime; the forms below are the ones a type checker can follow.
+runtime; the forms below are the ones a type checker can follow. Each verb
+carries the same family twice over, once returning the answer and once
+returning a `Receipt` around it.
 
 Regenerate with `mise run gen`.
 """
+
+# pylint: disable=too-many-lines  # 25 shapes x 2 verbs x 2 surfaces, all of it generated
 
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
@@ -13,13 +17,17 @@ from typing import overload
 
 from guideme._json import Json
 from guideme.question import Question
+from guideme.receipt import Receipt
 
 
 class SyncAskOverloads(ABC):
-    """The typed `ask` surface of `Guide`; `_ask` does the work."""
+    """The typed `ask` surfaces of `Guide`; the two `_ask` methods do the work."""
 
     @abstractmethod
     def _ask(self, shape: object, state: Json) -> object: ...
+
+    @abstractmethod
+    def _ask_with_receipt(self, shape: object, state: Json) -> Receipt[object]: ...
 
     @overload
     def ask[T](
@@ -357,12 +365,339 @@ class SyncAskOverloads(ABC):
         """
         return self._ask(shape, state)
 
+    @overload
+    def ask_with_receipt[T](
+        self,
+        shape: Question[T],
+        state: Json,
+    ) -> Receipt[T]: ...
+
+    @overload
+    def ask_with_receipt[T](
+        self,
+        shape: list[Question[T]],
+        state: Json,
+    ) -> Receipt[list[T]]: ...
+
+    @overload
+    def ask_with_receipt[K, T](
+        self,
+        shape: dict[K, Question[T]],
+        state: Json,
+    ) -> Receipt[dict[K, T]]: ...
+
+    @overload
+    def ask_with_receipt[T0](
+        self,
+        shape: tuple[Question[T0]],
+        state: Json,
+    ) -> Receipt[tuple[T0]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, T5]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T6](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            Question[T6],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, T5, T6]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T6, T7](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            Question[T6],
+            Question[T7],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, T5, T6, T7]]: ...
+
+    @overload
+    def ask_with_receipt[T0, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, dict[K, T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, dict[K, T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, dict[K, T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, dict[K, T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, dict[K, T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, T5, dict[K, T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T6, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            Question[T6],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, T5, T6, dict[K, T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, list[T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, list[T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, list[T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, list[T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, list[T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, T5, list[T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T6, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            Question[T6],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Receipt[tuple[T0, T1, T2, T3, T4, T5, T6, list[T]]]: ...
+
+    def ask_with_receipt(self, shape: object, state: Json) -> Receipt[object]:
+        """Answer `shape` about `state`, with what the request cost and what answered it.
+
+        Exactly `ask`, returning a `Receipt` instead of the answer alone: `ask` is this
+        call followed by `.answer`. Reach for it to attribute cost, or to pin a policy to
+        the model version whose numbers it was tuned against, and note that `model` is
+        the versioned id even where an alias such as `jev-latest` was asked for.
+
+        Args:
+            shape: A question, or a tuple, list or dict of questions, nested freely.
+                Ids are `q0..qN` in encounter order, and `Receipt.answer` has the
+                shape of the request.
+            state: What to judge, as anything JSON-shaped.
+
+        Returns:
+            A `Receipt` carrying the answers, the model that produced them, and the
+            token usage of the one request they came from.
+
+        Raises:
+            The same errors as `ask`, on the same terms.
+        """
+        return self._ask_with_receipt(shape, state)
+
 
 class AsyncAskOverloads(ABC):
-    """The typed `ask` surface of `AsyncGuide`; `_ask` does the work."""
+    """The typed `ask` surfaces of `AsyncGuide`; the two `_ask` methods do the work."""
 
     @abstractmethod
     def _ask(self, shape: object, state: Json) -> Awaitable[object]: ...
+
+    @abstractmethod
+    def _ask_with_receipt(self, shape: object, state: Json) -> Awaitable[Receipt[object]]: ...
 
     @overload
     def ask[T](
@@ -699,3 +1034,327 @@ class AsyncAskOverloads(ABC):
             UnexpectedStatusError: a status the contract does not define.
         """
         return self._ask(shape, state)
+
+    @overload
+    def ask_with_receipt[T](
+        self,
+        shape: Question[T],
+        state: Json,
+    ) -> Awaitable[Receipt[T]]: ...
+
+    @overload
+    def ask_with_receipt[T](
+        self,
+        shape: list[Question[T]],
+        state: Json,
+    ) -> Awaitable[Receipt[list[T]]]: ...
+
+    @overload
+    def ask_with_receipt[K, T](
+        self,
+        shape: dict[K, Question[T]],
+        state: Json,
+    ) -> Awaitable[Receipt[dict[K, T]]]: ...
+
+    @overload
+    def ask_with_receipt[T0](
+        self,
+        shape: tuple[Question[T0]],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, T5]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T6](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            Question[T6],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, T5, T6]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T6, T7](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            Question[T6],
+            Question[T7],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, T5, T6, T7]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, dict[K, T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, dict[K, T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, dict[K, T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, dict[K, T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, dict[K, T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, T5, dict[K, T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T6, K, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            Question[T6],
+            dict[K, Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, T5, T6, dict[K, T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, list[T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, list[T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, list[T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, list[T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, list[T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, T5, list[T]]]]: ...
+
+    @overload
+    def ask_with_receipt[T0, T1, T2, T3, T4, T5, T6, T](
+        self,
+        shape: tuple[
+            Question[T0],
+            Question[T1],
+            Question[T2],
+            Question[T3],
+            Question[T4],
+            Question[T5],
+            Question[T6],
+            list[Question[T]],
+        ],
+        state: Json,
+    ) -> Awaitable[Receipt[tuple[T0, T1, T2, T3, T4, T5, T6, list[T]]]]: ...
+
+    def ask_with_receipt(self, shape: object, state: Json) -> Awaitable[Receipt[object]]:
+        """Answer `shape` about `state`, with what the request cost and what answered it.
+
+        Exactly `ask`, returning a `Receipt` instead of the answer alone: `ask` is this
+        call followed by `.answer`. Reach for it to attribute cost, or to pin a policy to
+        the model version whose numbers it was tuned against, and note that `model` is
+        the versioned id even where an alias such as `jev-latest` was asked for.
+
+        Args:
+            shape: A question, or a tuple, list or dict of questions, nested freely.
+                Ids are `q0..qN` in encounter order, and `Receipt.answer` has the
+                shape of the request.
+            state: What to judge, as anything JSON-shaped.
+
+        Returns:
+            A `Receipt` carrying the answers, the model that produced them, and the
+            token usage of the one request they came from.
+
+        Raises:
+            The same errors as `ask`, on the same terms.
+        """
+        return self._ask_with_receipt(shape, state)

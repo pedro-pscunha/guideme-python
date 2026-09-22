@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast, final
 
+import httpx
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -45,7 +46,7 @@ from guideme.api.client import EVALUATE, MODELS
 from guideme.ask import Plan, encode
 from guideme.guide import KEY_VAR, ModelInfo
 from guideme.question import Question, choose_among, noul, score_levels
-from guideme.telemetry import ASK_SPAN, Events
+from guideme.telemetry import ASK_SPAN, RETRY_EVENT, Events
 
 from .conftest import (
     FIXTURES,
@@ -55,9 +56,11 @@ from .conftest import (
     TICKET,
     WIRE_ANSWER,
     Configure,
+    Handler,
     Json,
     Recorded,
     Runner,
+    as_list,
     as_object,
     async_entry,
     attributes,
@@ -199,6 +202,11 @@ def _parsed_the_retry_after(error: GuidemeError) -> None:
     assert error.retry_after == timedelta(seconds=0)
 
 
+def _kept_the_retry_after(error: GuidemeError) -> None:
+    assert isinstance(error, OverloadedError)
+    assert error.retry_after == timedelta(seconds=0)
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class Failure:
@@ -228,7 +236,13 @@ FAILURES = [
         1,
         _nothing_more,
     ),
-    Failure(_status(529), OverloadedError, "overloaded", RETRIES + 1, _nothing_more),
+    Failure(
+        _status(529, retry_after="0"),
+        OverloadedError,
+        "overloaded",
+        RETRIES + 1,
+        _kept_the_retry_after,
+    ),
     Failure(_refused, TransportError, "transport", 0, _nothing_more),
 ]
 
@@ -251,17 +265,56 @@ def test_every_failure_raises_its_typed_error_and_marks_the_ask_span(
     assert attributes(spans.one(ASK_SPAN))["error.type"] == failure.kind
 
 
+MODELS_BODY: Json = {
+    "models": [
+        {
+            "name": MODEL,
+            "description": "The current stable Jev.",
+            "release_date": "2026-02-11",
+        },
+        {
+            "name": "jev-1.12.0",
+            "description": "The Jev before it.",
+            "release_date": "2025-11-04",
+        },
+    ]
+}
+"""A `GET /v1/models` body, as the docs describe one."""
+
+
 BACKOFF = timedelta(milliseconds=300)
 """Long enough to measure that a retry really waited, short enough to pay for twice."""
 
 
-def test_a_429_is_retried_after_waiting_out_the_backoff(
-    httpserver: HTTPServer, runner: Runner
-) -> None:
+def _waiting(builder: GuideBuilder) -> GuideBuilder:
+    """Long enough a backoff that a resend cannot be mistaken for a fast first answer."""
+    return builder.backoff(BACKOFF)
+
+
+def _throttled_ask(httpserver: HTTPServer, runner: Runner) -> None:
     httpserver.expect_oneshot_request(EVALUATE, method="POST").respond_with_data("", status=429)
     expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
+    assert runner.ask(noul("Urgent?"), TICKET, _waiting) is True
+
+
+def _throttled_models(httpserver: HTTPServer, runner: Runner) -> None:
+    httpserver.expect_oneshot_request(MODELS, method="GET").respond_with_data("", status=429)
+    httpserver.expect_request(MODELS, method="GET").respond_with_data(
+        json.dumps(MODELS_BODY), content_type=JSON
+    )
+    assert len(runner.models(_waiting)) == len(as_list(as_object(MODELS_BODY)["models"]))
+
+
+THROTTLED = [_throttled_ask, _throttled_models]
+"""Both endpoints, each throttled once. The API docs promise a retry on either."""
+
+
+@pytest.mark.parametrize("throttled", THROTTLED, ids=["evaluate", "models"])
+def test_a_429_is_retried_after_waiting_out_the_backoff(
+    httpserver: HTTPServer, runner: Runner, throttled: Callable[[HTTPServer, Runner], None]
+) -> None:
     started = time.monotonic()
-    assert runner.ask(noul("Urgent?"), TICKET, lambda builder: builder.backoff(BACKOFF)) is True
+    throttled(httpserver, runner)
     assert time.monotonic() - started >= BACKOFF.total_seconds()
     assert len(httpserver.log) == 2
 
@@ -303,6 +356,14 @@ def test_two_async_asks_wait_out_their_retries_at_the_same_time(httpserver: HTTP
     assert len(httpserver.log) == 2 * CONCURRENT
 
 
+def test_a_derived_guide_closes_without_closing_the_pool_it_shares(
+    httpserver: HTTPServer, runner: Runner
+) -> None:
+    expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
+    assert runner.paired(noul("Urgent?"), TICKET) == [True, True]
+    assert len(httpserver.log) == 2
+
+
 def _spent(input_tokens: int, output_tokens: int) -> str:
     """A reply whose single noul answer is fine and whose `usage` is what is under test."""
     return json.dumps(
@@ -312,6 +373,112 @@ def _spent(input_tokens: int, output_tokens: int) -> str:
             "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
         }
     )
+
+
+SECOND = timedelta(seconds=1)
+"""Any timeout at all: what these cases prove is the refusal, never the duration."""
+
+
+def _answering_offline(request: httpx.Request) -> httpx.Response:
+    """The whole server one `httpx.MockTransport` test needs: the bearer, then a noul."""
+    assert request.headers["authorization"] == f"Bearer {TEST_KEY}"
+    assert request.url.path == EVALUATE
+    return httpx.Response(200, text=noul_reply(0.95), headers={"content-type": JSON})
+
+
+def test_an_injected_transport_answers_an_ask_with_no_server(runner: Runner) -> None:
+    assert runner.offline(noul("Urgent?"), TICKET, _answering_offline) is True
+
+
+def _failing(failure: type[httpx.RequestError], detail: str) -> Handler:
+    """A handler that raises the way one case asks instead of answering."""
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise failure(detail, request=request)
+
+    return fail
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class BeforeAResponse:
+    """A failure that arrives with no response at all, and how guideme must treat it."""
+
+    fail: Handler
+    """What the transport raises. Each case raises it once and answers after that."""
+
+    attempts: int
+    """Calls the transport sees: one when the failure ends the ask, two when it is resent."""
+
+    answered: bool
+    """Whether an answer comes back, which only a resent failure can produce."""
+
+
+NEVER_REACHED = [
+    BeforeAResponse(_failing(httpx.ConnectError, "connection refused"), 2, answered=True),
+    BeforeAResponse(_failing(httpx.ConnectTimeout, "connect timed out"), 2, answered=True),
+    BeforeAResponse(_failing(httpx.ReadTimeout, "read timed out"), 1, answered=False),
+    BeforeAResponse(_failing(httpx.RemoteProtocolError, "server hung up"), 1, answered=False),
+]
+"""Connecting never reached a server, so it is safe to resend. A read timeout and a
+disconnect mid-response mean the request did reach one, which may already have judged it."""
+
+
+@final
+@dataclass(slots=True)
+class _Flaky:
+    """A transport that fails its first call the way one case asks, then answers."""
+
+    fail: Handler
+    calls: int = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.calls += 1
+        if self.calls == 1:
+            return self.fail(request)
+        return _answering_offline(request)
+
+
+@pytest.mark.parametrize(
+    "case",
+    NEVER_REACHED,
+    ids=["connect_error", "connect_timeout", "read_timeout", "remote_protocol_error"],
+)
+def test_only_a_failure_that_never_reached_a_server_is_resent(
+    runner: Runner, spans: Recorded, case: BeforeAResponse
+) -> None:
+    flaky = _Flaky(case.fail)
+    if case.answered:
+        assert runner.offline(noul("Urgent?"), TICKET, flaky) is True
+    else:
+        with pytest.raises(TransportError):
+            _ = runner.offline(noul("Urgent?"), TICKET, flaky)
+    assert flaky.calls == case.attempts
+
+    resends = [
+        event
+        for span in spans.named(f"POST {EVALUATE}")
+        for event in spans.events(span, RETRY_EVENT)
+    ]
+    assert len(resends) == case.attempts - 1
+    for event in resends:
+        carried = attributes(event)
+        assert carried["error.type"] == "transport"
+        assert "http.response.status_code" not in carried
+
+
+SPENT = (296, 20)
+"""The token counts `_spent` reports, and what a receipt must hand back unchanged."""
+
+
+def test_a_receipt_carries_the_model_and_the_usage_the_body_reported(
+    httpserver: HTTPServer, runner: Runner
+) -> None:
+    expect_post(httpserver).respond_with_data(_spent(*SPENT), content_type=JSON)
+    receipt = runner.receipt(noul("Urgent?"), TICKET)
+    assert receipt.answer is True
+    assert receipt.model == MODEL
+    assert (receipt.usage.input_tokens, receipt.usage.output_tokens) == SPENT
 
 
 VIOLATIONS = [noul_reply(1.5), _spent(-1, 20), _spent(296, -1)]
@@ -630,6 +797,28 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
     _ = GuideBuilder().api_key(ApiKey("k")).events(unknown)
 
 
+def _a_timeout_beside_a_transport(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = GuideBuilder().transport(httpx.MockTransport(_answering_offline)).timeout(SECOND)
+
+
+def _a_transport_beside_a_timeout(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = GuideBuilder().timeout(SECOND).transport(httpx.MockTransport(_answering_offline))
+
+
+def _an_async_transport_beside_a_timeout(_monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = GuideBuilder().timeout(SECOND).async_transport(httpx.MockTransport(_answering_offline))
+
+
+def _an_async_transport_built_as_sync(_monkeypatch: pytest.MonkeyPatch) -> None:
+    builder = GuideBuilder().api_key(ApiKey("k"))
+    _ = builder.async_transport(httpx.MockTransport(_answering_offline)).build()
+
+
+def _a_sync_transport_built_as_async(_monkeypatch: pytest.MonkeyPatch) -> None:
+    builder = GuideBuilder().api_key(ApiKey("k"))
+    _ = builder.transport(httpx.MockTransport(_answering_offline)).build_async()
+
+
 @pytest.mark.parametrize(
     "build",
     [
@@ -650,6 +839,11 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         _events_both_without_the_logs_api,
         _events_log_with_a_drifted_log_record,
         _events_given_an_unknown_mode,
+        _a_timeout_beside_a_transport,
+        _a_transport_beside_a_timeout,
+        _an_async_transport_beside_a_timeout,
+        _an_async_transport_built_as_sync,
+        _a_sync_transport_built_as_async,
     ],
     ids=[
         "credentialed_base_url",
@@ -669,6 +863,11 @@ def _events_given_an_unknown_mode(_monkeypatch: pytest.MonkeyPatch) -> None:
         "events_both_without_the_logs_api",
         "events_log_with_a_drifted_log_record",
         "events_given_an_unknown_mode",
+        "a_timeout_beside_a_transport",
+        "a_transport_beside_a_timeout",
+        "an_async_transport_beside_a_timeout",
+        "an_async_transport_built_as_sync",
+        "a_sync_transport_built_as_async",
     ],
 )
 def test_a_configuration_mistake_is_refused_before_a_guide_exists(
@@ -774,23 +973,6 @@ def test_the_request_carries_the_bearer_token_and_matches_the_schema(
     check_request(body)
     assert list(as_object(body["questions"])) == ["q0", "q1", "q2"]
     assert body["state"] == TICKET
-
-
-MODELS_BODY: Json = {
-    "models": [
-        {
-            "name": MODEL,
-            "description": "The current stable Jev.",
-            "release_date": "2026-02-11",
-        },
-        {
-            "name": "jev-1.12.0",
-            "description": "The Jev before it.",
-            "release_date": "2025-11-04",
-        },
-    ]
-}
-"""A `GET /v1/models` body, as the docs describe one."""
 
 
 def test_the_model_list_comes_back_as_values_under_its_own_span(
