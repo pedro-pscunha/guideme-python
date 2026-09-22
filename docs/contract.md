@@ -56,6 +56,30 @@ text; `examples` and `counterexamples`, the two clauses in declaration order; an
 the exact bytes the algorithm above must produce. The `noul` cases come from the runtime
 renderer rather than a derive, so they are the vector's only cover for that path.
 
+Items are inserted **verbatim**. Nothing is escaped: an item containing `"; "` or a newline is
+placed in the clause exactly as written, and the rendering is not required to be reversible —
+no SDK parses a rendered rubric back into its parts, and none should be written to.
+
+### Which declarations are legal
+
+These rules hold in every SDK, and each is refused where the rubric is written rather than at
+ask time.
+
+- An **empty** clause written out is refused. Leaving a clause off is how you say there is
+  none; an empty sequence is a clause the caller wrote that says nothing.
+- An **empty** entry within a clause is refused.
+- A **duplicate** entry within one clause is refused.
+- One string as an example of **two alternatives of the same question** is refused: it says one
+  input belongs to both, which cannot be true.
+- One string as **both an example and a counterexample of one alternative** is refused: it says
+  the input does and does not belong there.
+- One string as an example of one alternative and a **counterexample of another must be
+  allowed**. This is the confusable-alternatives pattern the feature exists to serve, and an
+  implementation that refused it would break the main use case.
+- Examples are **attached to a blank rubric** is refused; a blank rubric with no examples is
+  not. See below.
+- A counterexample on a **level** is refused: an ordered scale has no "not this option".
+
 ### What counts as blank, and what counts as a duplicate
 
 Two rules a third implementer would otherwise have to guess, and would guess differently.

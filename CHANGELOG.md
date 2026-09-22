@@ -2,10 +2,6 @@
 
 ## Unreleased
 
-Nothing yet.
-
-## 0.1.1 — 2026-09-21
-
 Additive. Nothing that worked in 0.1.0 sends different bytes.
 
 - `option(rubric, examples=…, counterexamples=…)` and `level(rubric, examples=…)` join
@@ -40,6 +36,11 @@ Additive. Nothing that worked in 0.1.0 sends different bytes.
   answer in a `Key`, a `Rank` and a `bool`, none of which has a member to fall back to, so the
   marking had nothing to act on and was being dropped in silence. Use `.otherwise(…)` on the
   question, which is what the `Levels` rule has always said.
+- A rubric built by `option(…)`, `level(…)` or `fallback(…)` can be copied and pickled again.
+  Carrying the parts meant `__new__` took four arguments where `str` hands back one, so
+  `copy.copy`, `copy.deepcopy` and `pickle` raised a `TypeError` — including on the
+  `copy.deepcopy({"key": option(…)})` a caller writes before `choose_among`. A bare string did
+  this in 0.1.0 and does it again.
 
 ## 0.1.0 — 2026-09-21
 
