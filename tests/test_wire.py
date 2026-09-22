@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines  # every wire and contract assertion; split is a follow-up
 import asyncio
 import json
 import time
@@ -421,13 +422,9 @@ NEVER_REACHED = [
     BeforeAResponse(_failing(httpx.PoolTimeout, "waited for a connection"), 1, answered=False),
     BeforeAResponse(_failing(httpx.RemoteProtocolError, "server hung up"), 1, answered=False),
 ]
-"""A refused or reset connection is safe to resend: it never reached a server, so nothing
-was judged. Everything else here is not. A read timeout and a disconnect mid-response mean
-the request did arrive and may already have been judged. A timeout of any phase is excluded
-whatever phase it names, because `httpx.ConnectTimeout` has no counterpart in Rust: one
-`reqwest` deadline covers the whole attempt, so a connect-phase timeout there is
-indistinguishable from a read timeout, and retrying it would also multiply the wall time
-the builder promises. Retrying it here and not there would be the SDKs disagreeing."""
+"""One case that is resent and four that are not. A refused connection never reached a
+server, so nothing was judged; everything else here either did arrive, or is a timeout, and
+no timeout is resent whatever phase it names. `client.resend_after` carries the reasoning."""
 
 
 @final
