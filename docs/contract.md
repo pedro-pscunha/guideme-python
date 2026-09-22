@@ -69,15 +69,31 @@ derive and in `Rubric::into_wire()` — so a declaration is legal in both or in 
 
 **"Blank" means Unicode `White_Space`.** Rust's `str::trim` is exactly that property. Python's
 `str.strip()` is a superset: measured against the current runtime it strips 29 codepoints to
-`White_Space`'s 25, the four extra being `U+001C`–`U+001F`, the file, group, record and unit
-separators. So a rubric made only of those characters is blank to Python and not to Rust. That
-boundary is stated rather than hidden, and it is deliberate: those four are C0 controls that are
-never valid rubric text, so no real declaration reaches the difference.
+`White_Space`'s 25, and the four extra are `U+001C`, `U+001D`, `U+001E` and `U+001F` — file,
+group, record and unit separator. Nothing goes the other way: every `White_Space` codepoint is
+one Python strips.
+
+Those four are **C0** controls. The C0 block is `U+0000`–`U+001F`; C1 is `U+0080`–`U+009F` and
+contains none of them. The distinction is worth stating because the point of writing this rule
+down is that two SDKs must not describe the boundary differently, and naming the wrong block
+would do exactly that.
+
+So a rubric made only of those four is blank to Python and not to Rust. The difference is
+documented rather than hidden, and it is harmless: C0 controls are never valid rubric text, so
+no real declaration reaches it.
 
 **A duplicate is an exact string match**, with no normalisation, no case folding and no
 trimming. `"a"` and `" a"` are two different examples and may sit in the same clause. An
 implementation that normalised before comparing would refuse declarations these SDKs accept,
 which is the same divergence as a different label by another route.
+
+**The two checks disagree about `" a"`, and they are meant to.** The emptiness check trims
+before deciding, so `" a"` is not blank and `" "` is; the duplicate check does not trim, so
+`" a"` and `"a"` are two entries. That reads like a bug until you see what each one is asking.
+Emptiness asks whether the caller wrote anything at all, and a leading space does not change
+the answer. Duplication asks whether two entries would put the same bytes in front of the
+model, and a leading space does change that, because the text is rendered verbatim. Trimming
+for one and not the other is the only pairing that keeps both questions honest.
 
 One asymmetry is deliberate. `choose_among` and `score_levels` here take an `option(…)` or a
 `level(…)` value; Rust's equivalents keep taking a plain string, because widening their
