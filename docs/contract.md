@@ -216,7 +216,7 @@ for a pooled connection each get the whole of it — so an attempt that is slow 
 phase outlasts the number written in the builder. Wrapping it to match would need a different
 wrapper for the synchronous and the asyncio surfaces and would change what cancellation means,
 which is a worse trade than saying so. It is documented on `GuideBuilder.timeout`, in the
-README's configuration section, and here. Nothing on the wire depends on it.
+README's **Retries and timeouts** section, and here. Nothing on the wire depends on it.
 
 Drift is caught rather than trusted. `mise run spec-check` clones guideme-rust, diffs its `spec/`
 against this one and fails on any difference except `spec/SOURCE`, which is provenance and has
