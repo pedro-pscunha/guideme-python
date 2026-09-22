@@ -371,12 +371,12 @@ def retry_event(
 ) -> None:
     """One `guideme.retry`. `attempt` is the ordinal of the resend about to be made.
 
-    `status` is the one a response arrived with, or `None` when the attempt failed
-    before any response — a connection that was refused, reset, or timed out while being
-    opened. Those two cases carry different attributes, and exactly one of the two is on
-    every event: a status, or `error.type` naming the transport. Neither is ever absent
-    and neither is ever a placeholder, because a dashboard grouping retries by cause has
-    to be able to tell a throttled API from an unreachable one.
+    `status` is the one a response arrived with, or `None` when the connection failed:
+    refused, reset, or a TLS handshake that did not complete. No timeout is resent, so no
+    timeout reaches here. Those two cases carry different attributes, and exactly one of
+    the two is on every event: a status, or `error.type` naming the transport. Neither is
+    ever absent and neither is ever a placeholder, because a dashboard grouping retries by
+    cause has to be able to tell a throttled API from an unreachable one.
 
     The log record is the `WARN` the Rust SDK logs; a span event carries no severity, so
     on the span its presence is the signal.

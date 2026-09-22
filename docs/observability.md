@@ -128,6 +128,12 @@ carries `error.type = transport` for them; only the retry event is absent, and i
 is what says the call ended there. `docs/contract.md` has the reasoning, including why a
 connect-phase timeout is excluded although `httpx` can name it.
 
+One caveat, and the Rust SDK carries the same one. A transport handed in through
+`GuideBuilder.transport(…)` decides which exception a failure is raised as, and therefore
+which side of that line it falls on: a custom transport that reports a connect timeout as
+`httpx.ConnectError` will see it resent. guideme's own rule does not change — it classifies
+what it is given — so what these events report stays exactly what the transport reported.
+
 ### Log records
 
 Every answer and every retry is also an OTLP log record, so a backend with a logs pipeline

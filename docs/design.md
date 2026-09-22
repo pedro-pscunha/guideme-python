@@ -230,8 +230,17 @@ Each module survives the test.
   release came from. With a flag per client, closing one guide twice releases once. Sharing
   from an already-closed client is refused rather than copied: it would hand back a client
   holding nothing over a pool that may already be shut, and that only surfaces on the first
-  ask. The clamp at zero inside `release` is the last line of defence, not the mechanism.
-- **Four names mean two things each, and the pairs are not renamed.** `Question`,
+  ask. The clamp at zero inside `drop` is the last line of defence, not the mechanism.
+  All of it — the count and every holder's flag — sits under one `threading.Lock` on the
+  pool, because `Guide` tells you to share a guide across threads and a flag read, a flag
+  flip and a decrement are three steps that must not interleave. The lock is taken when a
+  guide is derived and when one is closed, never per request: `ask` reads the `httpx` client
+  and nothing else. `httpx`'s own close happens after the lock is released, and no `await`
+  is ever reached while it is held, so the asyncio pool uses the same plain lock.
+  A patch that cannot settle is settled **before** the hold is taken. Building the derived
+  guide in one expression took the hold first, because Python evaluates arguments left to
+  right, and a bad patch then raised with nothing left to release it.
+- **Some names mean two things, and the pairs are not renamed.** `Question`,
   `NoulQuestion`, `ChoiceQuestion` and `ScoreQuestion` each name a user-facing value in
   `guideme.question`, re-exported from `guideme`, and a pydantic wire model in `guideme.api`.
   The first is what a caller builds and annotates; the second is the shape it becomes on the
@@ -242,6 +251,13 @@ Each module survives the test.
   user-facing ones are what a caller writes; a third spelling of either would be the one that
   had to be explained. `guideme.api.NoulCriteria` and `guideme.question.NoulCriteria` are a
   fifth such pair, for the same reason, and `api`'s module docstring already says so.
+  `Usage` is the pair 0.2.0 added and the only one where **both** halves sit in a published
+  `__all__`: `guideme.Usage` is the frozen dataclass a receipt carries and `guideme.api.Usage`
+  is the pydantic model the response is parsed into, and `_receipt` copies one into the other.
+  That is the cost of the decision above — not exporting the wire model is what creates a
+  second `Usage` — and it is the right way round: a caller reaching the top-level surface gets
+  the value object, and the name they would otherwise collide with is in a module they only
+  import when they are building requests by hand.
 - **State is JSON-shaped.** Anything `json.dumps` accepts without a default hook. A dataclass
   goes through `dataclasses.asdict`, a pydantic model through `.model_dump()`. This is the one
   untyped value in the package, and it is serialised at the boundary.

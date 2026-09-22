@@ -56,6 +56,15 @@ Everything else is additive.
 
 ### Fixed
 
+- `with_policy(…)` no longer leaks a hold on the connection pool when the patch it is given
+  cannot settle. Python evaluates arguments left to right, so the hold was taken before the
+  patch was validated and nothing released it: the guide that would have was never built.
+  The patch settles first now. A pool that never closes is invisible until a process runs
+  out of sockets, so the regression asserts the count rather than the symptom.
+- The pool's count and every holder's spent-flag are taken under one lock. `Guide`'s
+  docstring says to share a guide across threads, so two threads closing two guides over one
+  pool is a documented thing to do, and a flag read, a flag flip and a decrement are three
+  steps that must not interleave. `ask` is untouched and takes no lock.
 - Closing one guide twice no longer closes the connection pool under a guide derived from it
   with `with_policy(…)`. `share()` now hands back a distinct client over the shared pool, each
   carrying its own release-once flag, so a guide releases exactly once however many times it

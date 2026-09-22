@@ -254,10 +254,16 @@ class Guide(SyncAskOverloads):
         closes when the last of them does. Each guide holds and releases on its own, so
         closing one of them twice releases once and never touches the other's hold.
 
+        The patch is settled before the hold is taken. Python evaluates arguments left to
+        right, so building the guide in one expression took the hold first and leaked it
+        when a bad patch raised: the pool was left holding a client that never existed.
+
         Raises:
-            ConfigError: this guide has already been closed, so there is no hold to share.
+            ConfigError: the patched policy's thresholds are out of range, or this guide
+                has already been closed, so there is no hold to share.
         """
-        return Guide(self._client.share(), _merged(self._config, policy))
+        config = _merged(self._config, policy)
+        return Guide(self._client.share(), config)
 
     def __enter__(self) -> Self:
         """Enter a `with` block. The guide is ready to ask before this; nothing is opened here."""
@@ -345,10 +351,16 @@ class AsyncGuide(AsyncAskOverloads):
         closes when the last of them does. Each guide holds and releases on its own, so
         closing one of them twice releases once and never touches the other's hold.
 
+        The patch is settled before the hold is taken. Python evaluates arguments left to
+        right, so building the guide in one expression took the hold first and leaked it
+        when a bad patch raised: the pool was left holding a client that never existed.
+
         Raises:
-            ConfigError: this guide has already been closed, so there is no hold to share.
+            ConfigError: the patched policy's thresholds are out of range, or this guide
+                has already been closed, so there is no hold to share.
         """
-        return AsyncGuide(self._client.share(), _merged(self._config, policy))
+        config = _merged(self._config, policy)
+        return AsyncGuide(self._client.share(), config)
 
     async def __aenter__(self) -> Self:
         """Enter an `async with` block. Nothing is opened here; the guide is already ready."""

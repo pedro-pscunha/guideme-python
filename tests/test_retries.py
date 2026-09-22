@@ -65,14 +65,40 @@ type Serve = Callable[[HTTPServer], Configure | None]
 type Check = Callable[[GuidemeError], None]
 """What one failure case asserts about the raised error beyond its class and kind."""
 
+type Drive = Callable[[Runner, Configure], object]
+"""Which call one failure case makes. Both endpoints map a status the same way."""
 
-def _status(status: int, body: str = "", retry_after: str | None = None) -> Serve:
+OVER_THE_CAP = "3600"
+"""A `retry-after` far past the 30 s guideme will wait. The call fails on the first attempt
+carrying that duration, so the caller decides whether an hour is worth waiting."""
+
+AN_HOUR = timedelta(seconds=3600)
+"""`OVER_THE_CAP` as the error must carry it."""
+
+
+def _status(
+    status: int,
+    body: str = "",
+    retry_after: str | None = None,
+    path: str = EVALUATE,
+    method: str = "POST",
+) -> Serve:
     headers = None if retry_after is None else {"retry-after": retry_after}
 
     def serve(httpserver: HTTPServer) -> Configure | None:
-        expect_post(httpserver).respond_with_data(body, status=status, headers=headers)
+        httpserver.expect_request(path, method=method).respond_with_data(
+            body, status=status, headers=headers
+        )
 
     return serve
+
+
+def _asking(runner: Runner, configure: Configure) -> object:
+    return runner.ask(noul("Urgent?"), TICKET, configure)
+
+
+def _listing(runner: Runner, configure: Configure) -> object:
+    return runner.models(configure)
 
 
 def _refused(_httpserver: HTTPServer) -> Configure | None:
@@ -98,6 +124,11 @@ def _kept_the_retry_after(error: GuidemeError) -> None:
     assert error.retry_after == timedelta(seconds=0)
 
 
+def _carried_an_hour(error: GuidemeError) -> None:
+    assert isinstance(error, RateLimitedError | OverloadedError)
+    assert error.retry_after == AN_HOUR
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class Failure:
@@ -108,6 +139,13 @@ class Failure:
     kind: str
     served: int
     check: Check
+    drive: Drive = _asking
+    """Which call to make. A status means the same thing on both endpoints, and the cases
+    that say so are the ones where it would be cheapest for them to have drifted apart."""
+
+    asks: bool = True
+    """Whether a `guideme.ask` span is expected. `models()` opens none, and proving its
+    absence is as much a statement as reading the failed one's `error.type`."""
 
 
 FAILURES = [
@@ -135,11 +173,59 @@ FAILURES = [
         _kept_the_retry_after,
     ),
     Failure(_refused, TransportError, "transport", 0, _nothing_more),
+    Failure(
+        _status(429, retry_after=OVER_THE_CAP),
+        RateLimitedError,
+        "rate_limited",
+        1,
+        _carried_an_hour,
+    ),
+    Failure(
+        _status(529, retry_after=OVER_THE_CAP),
+        OverloadedError,
+        "overloaded",
+        1,
+        _carried_an_hour,
+    ),
+    Failure(
+        _status(429, retry_after=OVER_THE_CAP, path=MODELS, method="GET"),
+        RateLimitedError,
+        "rate_limited",
+        1,
+        _carried_an_hour,
+        drive=_listing,
+        asks=False,
+    ),
+    Failure(
+        _status(529, retry_after=OVER_THE_CAP, path=MODELS, method="GET"),
+        OverloadedError,
+        "overloaded",
+        1,
+        _carried_an_hour,
+        drive=_listing,
+        asks=False,
+    ),
+]
+"""Every status the contract defines, then the four that prove a `retry-after` past the cap
+is not waited for: it fails on the first attempt and hands the caller the duration, on both
+endpoints and for both statuses that carry the header."""
+
+FAILURE_IDS = [
+    "auth",
+    "invalid",
+    "rate_limited",
+    "unexpected_status",
+    "overloaded",
+    "transport",
+    "rate_limited_over_the_cap",
+    "overloaded_over_the_cap",
+    "rate_limited_over_the_cap_on_models",
+    "overloaded_over_the_cap_on_models",
 ]
 
 
-@pytest.mark.parametrize("failure", FAILURES, ids=[case.kind for case in FAILURES])
-def test_every_failure_raises_its_typed_error_and_marks_the_ask_span(
+@pytest.mark.parametrize("failure", FAILURES, ids=FAILURE_IDS)
+def test_every_failure_raises_its_typed_error_and_marks_the_span(
     httpserver: HTTPServer, runner: Runner, spans: Recorded, failure: Failure
 ) -> None:
     extra = failure.serve(httpserver)
@@ -149,11 +235,14 @@ def test_every_failure_raises_its_typed_error_and_marks_the_ask_span(
         return settled if extra is None else extra(settled)
 
     with pytest.raises(failure.expected) as raised:
-        _ = runner.ask(noul("Urgent?"), TICKET, configure)
+        _ = failure.drive(runner, configure)
     assert raised.value.kind == failure.kind
     failure.check(raised.value)
     assert len(httpserver.log) == failure.served
-    assert attributes(spans.one(ASK_SPAN))["error.type"] == failure.kind
+    if failure.asks:
+        assert attributes(spans.one(ASK_SPAN))["error.type"] == failure.kind
+    else:
+        assert not spans.named(ASK_SPAN)
 
 
 BACKOFF = timedelta(milliseconds=300)
@@ -230,17 +319,26 @@ def test_two_async_asks_wait_out_their_retries_at_the_same_time(httpserver: HTTP
     assert len(httpserver.log) == 2 * CONCURRENT
 
 
-CLOSES = [1, 2]
-"""How many times the derived guide is closed. Once is the ordinary case; twice is the
-caller's mistake, and it must release once rather than spend the parent's hold as well."""
+PAIRINGS = [(1, 0), (2, 0), (1, 1)]
+"""`(closes, refused)` for each way a hold can go wrong.
+
+`closes` is how many times the derived guide is closed: once is the ordinary case, twice is
+the caller's mistake and must release once rather than spend the parent's hold too.
+`refused` is how many policy patches are offered to `with_policy` and rejected first, which
+must leave the count untouched — a refusal that had already taken a hold leaks it, because
+the guide that would have released it was never built."""
 
 
-@pytest.mark.parametrize("closes", CLOSES, ids=["closed_once", "closed_twice"])
-def test_neither_guide_closes_the_pool_while_the_other_still_holds_it(
-    httpserver: HTTPServer, runner: Runner, closes: int
+@pytest.mark.parametrize(
+    ("closes", "refused"),
+    PAIRINGS,
+    ids=["closed_once", "closed_twice", "after_a_refused_patch"],
+)
+def test_a_pool_is_held_once_per_guide_and_closes_when_the_last_one_releases(
+    httpserver: HTTPServer, runner: Runner, closes: int, refused: int
 ) -> None:
     expect_post(httpserver).respond_with_data(noul_reply(0.95), content_type=JSON)
-    answers, held = runner.paired(noul("Urgent?"), TICKET, closes)
+    answers, held = runner.paired(noul("Urgent?"), TICKET, closes, refused)
     assert answers == [True, True, True]
     assert len(httpserver.log) == 3
     assert not held

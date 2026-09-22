@@ -456,17 +456,32 @@ Everything not resent raises `TransportError` on the first failure.
 ## Lower layers
 
 Everything above is re-exported from the `guideme` package, and `guideme.__all__` is that list.
-The three modules below are a second supported tier: you import them by their own path, they
-are not re-exported at the top level, and they are under the same rule as the first tier —
-nothing in them is removed or renamed without a major version and a `CHANGELOG.md` entry.
-Anything else in the package is private, whatever its name looks like.
+
+Three modules are a second supported tier: `guideme.api`, `guideme.api.client` and
+`guideme.policy`. You import those by their own path, they are not re-exported at the top
+level, and they are under the same rule as the first tier — nothing in them is removed or
+renamed without a major version and a `CHANGELOG.md` entry. Anything else in the package is
+private, whatever its name looks like.
+
+The two bullets after them are not a tier. They say where some of the names above are
+declared, which is worth knowing when two of them share a spelling.
 
 - `guideme.api` is the exact wire mirror of `POST /v1/systemone` and `GET /v1/models`, and
-  `guideme.api.__all__` is what it offers: the request and response models, `Usage`, and the
-  four adapters between them and the core. `guideme.api.client` holds `Client` and
+  `guideme.api.__all__` is what it offers: the request and response models, its own `Usage`,
+  and the four adapters between them and the core. That `Usage` is the pydantic model a
+  response is parsed into, not the `Usage` a receipt carries — a receipt gets the frozen
+  dataclass of the same name from the top level, copied out of this one, so that nothing
+  pydantic sits on the surface you import from `guideme`. `guideme.api.client` holds `Client` and
   `AsyncClient` for callers who want to build requests themselves. They live one level down
   rather than on `guideme.api` because re-exporting them would make `api` and `api.client`
   import each other, and the gate fails an import cycle.
+- `guideme.policy.resolve(answer, thresholds)` is the pure decision function. `spec/` holds
+  its JSON Schemas and 42 golden vectors, vendored from
+  [guideme-rust](https://github.com/pedro-pscunha/guideme-rust), which publishes the contract.
+  [`docs/contract.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/contract.md)
+  says what every guideme SDK must satisfy and
+  [`docs/design.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/design.md)
+  records the design and its sharp edges.
 - `guideme.question` is where the question types are declared, and all of them are re-exported
   above: `Question` is what `noul`, `choose`, `choose_among`, `score` and `score_levels`
   return, and `NoulQuestion`, `ChoiceQuestion`, `ScoreQuestion`, `DetailedNoul`,
@@ -483,13 +498,6 @@ Anything else in the package is private, whatever its name looks like.
   rubric answers with, `Model` names the model to ask, and `ApiKey` carries the key without ever
   printing it. The first four are `NewType` brands, so the guarantee is that only the wire mints
   them, not that `Probability(2.0)` is rejected; it is not.
-- `guideme.policy.resolve(answer, thresholds)` is the pure decision function. `spec/` holds
-  its JSON Schemas and 42 golden vectors, vendored from
-  [guideme-rust](https://github.com/pedro-pscunha/guideme-rust), which publishes the contract.
-  [`docs/contract.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/contract.md)
-  says what every guideme SDK must satisfy and
-  [`docs/design.md`](https://github.com/pedro-pscunha/guideme-python/blob/main/docs/design.md)
-  records the design and its sharp edges.
 
 ## Other SDKs
 

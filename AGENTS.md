@@ -13,11 +13,14 @@ published to PyPI under `MIT OR Apache-2.0`. The public surface has two tiers:
   re-exported at the top level: `guideme.api` is the wire mirror and `guideme.api.client`
   holds `Client` and `AsyncClient`, and `guideme.policy` holds `resolve`.
 
-Every module that offers anything declares an `__all__`, and the list is what it owns rather
-than what it happens to have imported. `guideme/__init__.py` is the one exception to that
-reading, because it is a façade and every name in its list arrived by import;
-`tests/test_surface.py` therefore holds only `guideme.api` to the stricter rule, proving by
-AST that nothing it imported is re-exported. `guideme.question` no longer has a tier of its
+Six modules declare an `__all__`: `guideme` itself, `guideme.api`, and the four it draws
+names from — `question`, `policy`, `enums` and `errors`. Where a module has one, the list is
+what it owns rather than what it happens to have imported. `guideme/__init__.py` is the one
+exception to that reading, because it is a façade and every name in its list arrived by
+import; `tests/test_surface.py` therefore holds only `guideme.api` to the stricter rule,
+proving by AST that nothing it imported is re-exported. The rest — `receipt`, `scalars`,
+`guide`, `api.client`, `telemetry`, `ask`, `_json` — declare none, and nothing here asks
+them to: an `__all__` earns its place by being checked, and the check is the surface test. `guideme.question` no longer has a tier of its
 own: `Question`, the three question classes and the three detail classes are all in the top
 list now, because a caller annotating a stored question needed them and importing from a
 module the README called private to do it was the wrong answer. `validate`, `Spec` and the

@@ -15,9 +15,10 @@ import asyncio
 import time
 from collections.abc import Callable
 from copy import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from random import SystemRandom
+from threading import Lock
 from typing import Self, final
 
 import httpx
@@ -151,7 +152,7 @@ class RetryPolicy:
 @final
 @dataclass(slots=True)
 class _Pool[T]:
-    """One `httpx` client and the number of clients holding it.
+    """One `httpx` client, the number of clients holding it, and the lock over both.
 
     A guide derived with `with_policy` shares the pool its parent opened, and Python has
     no `Arc` to count that for us. So the count is explicit: every holder releases once,
@@ -161,22 +162,40 @@ class _Pool[T]:
     The count alone is not enough, and `Client.close` is where the rest of it lives: a
     holder that is closed twice must release once. Each `share()` hands back a distinct
     client carrying its own flag for that, so no count kept here can be spent by the
-    wrong holder. The clamp below is the last line of defence rather than the mechanism.
+    wrong holder. The clamp in `drop` is the last line of defence rather than the
+    mechanism.
+
+    **`guard` covers the count and every holder's flag together.** `Guide`'s docstring
+    says to share a guide across threads, so two threads closing two guides over one pool
+    is a documented thing to do; a flag read, a flag flip and a decrement are three steps,
+    and interleaving them either closes a live transport or leaks it. Hold `guard` across
+    all three. `take` and `drop` therefore do not lock: their caller is already inside it,
+    and a lock taken twice would deadlock. Nothing slow happens under it — `httpx`'s own
+    close is called after it is released, and no `await` is ever reached while it is held,
+    so the asyncio client can use the same plain lock as the synchronous one.
+
+    `ask` never touches any of this. It reads `http` and nothing else, so the pool's lock
+    is taken once when a guide is derived and once when one is closed, never per request.
     """
 
     http: T
     holders: int = 1
+    guard: Lock = field(default_factory=Lock)
 
-    def acquire(self) -> None:
-        """Take one more hold on the pool, for a client derived from one already holding it."""
+    def take(self) -> None:
+        """Take one more hold, for a client derived from one already holding it.
+
+        Call with `guard` held.
+        """
         self.holders += 1
 
-    def release(self) -> bool:
+    def drop(self) -> bool:
         """Drop one hold. True when this was the last, so the transport must be closed.
 
-        Every caller is a `Client.close` that has just flipped its own hold to spent, so
-        in practice the count never reaches here already at zero. It is clamped anyway:
-        returning `True` off a negative count would close a live transport.
+        Call with `guard` held. Every caller is a `Client.close` that has just flipped its
+        own flag to spent in the same critical section, so in practice the count never
+        reaches here already at zero. It is clamped anyway: returning `True` off a
+        negative count would close a live transport.
         """
         if not self.holders:
             return False
@@ -399,10 +418,11 @@ class Client:
         Raises:
             ConfigError: this client has already been closed.
         """
-        if not self._holding:
-            detail = "cannot share a closed client"
-            raise ConfigError(detail)
-        self._pool.acquire()
+        with self._pool.guard:
+            if not self._holding:
+                detail = "cannot share a closed client"
+                raise ConfigError(detail)
+            self._pool.take()
         return copy(self)
 
     def evaluate(self, request: Request) -> Response:
@@ -471,10 +491,12 @@ class Client:
         second close here can never spend a hold that belongs to a client `share()`
         handed out.
         """
-        if not self._holding:
-            return
-        self._holding = False
-        if self._pool.release():
+        with self._pool.guard:
+            if not self._holding:
+                return
+            self._holding = False
+            last = self._pool.drop()
+        if last:
             self._pool.http.close()
 
 
@@ -518,10 +540,11 @@ class AsyncClient:
         Raises:
             ConfigError: this client has already been closed.
         """
-        if not self._holding:
-            detail = "cannot share a closed client"
-            raise ConfigError(detail)
-        self._pool.acquire()
+        with self._pool.guard:
+            if not self._holding:
+                detail = "cannot share a closed client"
+                raise ConfigError(detail)
+            self._pool.take()
         return copy(self)
 
     async def evaluate(self, request: Request) -> Response:
@@ -580,8 +603,10 @@ class AsyncClient:
 
     async def close(self) -> None:
         """Release this client's hold on the pool. `Client.close` says why it is idempotent."""
-        if not self._holding:
-            return
-        self._holding = False
-        if self._pool.release():
+        with self._pool.guard:
+            if not self._holding:
+                return
+            self._holding = False
+            last = self._pool.drop()
+        if last:
             await self._pool.http.aclose()

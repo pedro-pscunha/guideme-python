@@ -25,7 +25,7 @@ from pydantic import TypeAdapter
 from pytest_httpserver import HTTPServer
 from pytest_httpserver.httpserver import RequestHandler
 
-from guideme import ApiKey, AsyncGuide, Guide, GuideBuilder, Receipt, telemetry
+from guideme import ApiKey, AsyncGuide, ConfigError, Guide, GuideBuilder, Receipt, telemetry
 from guideme._json import Json
 from guideme.api import Answer as WireAnswer
 from guideme.api import answer_from_wire
@@ -308,6 +308,22 @@ def client_vars(guide: Guide | AsyncGuide) -> str:
     return repr(vars(inner))
 
 
+BAD_PATCH = Policy(yes_above=2.0)
+"""A policy patch that cannot settle: a threshold outside `0..=1`.
+
+`with_policy` has to refuse it *before* taking a hold on the pool. Settling after the hold
+was taken leaked one per refusal, and nothing downstream could tell: the guide that would
+have held it was never built, so no close was ever coming for it.
+"""
+
+
+def refuse_patches(guide: Guide | AsyncGuide, times: int) -> None:
+    """Offer `BAD_PATCH` to `with_policy` `times` times, requiring each to be refused."""
+    for _ in range(times):
+        with pytest.raises(ConfigError):
+            _ = guide.with_policy(BAD_PATCH)
+
+
 def pool_holders(guide: Guide | AsyncGuide) -> int:
     """Holds left on a guide's connection pool.
 
@@ -422,7 +438,9 @@ class Runner:
         async with self._builder(None).build_async() as guide:
             return await _async_receipt_entry(guide)(shape, state)
 
-    def paired(self, shape: object, state: Json, closes: int) -> tuple[list[object], int]:
+    def paired(
+        self, shape: object, state: Json, closes: int, refused: int
+    ) -> tuple[list[object], int]:
         """Three asks across a guide and one derived from it, closing the derived one.
 
         Both are entered as context managers, so the derived guide is closed `closes`
@@ -431,6 +449,10 @@ class Runner:
         that is the whole invariant. One close of the derived guide must not take the
         parent's hold, and neither must a second: a guide closed twice releases once.
 
+        `refused` policy patches are offered to `with_policy` first and must each be
+        refused; a refusal that took a hold on the way to raising shows up in the count
+        at the end, because no guide exists to release it.
+
         Returns the three answers and the holds left on the pool once both guides have
         left their blocks, which must be zero. Without that count a guide that leaked a
         hold would pass: the asks all answer either way, and the difference between
@@ -438,6 +460,7 @@ class Runner:
         """
         if self.kind == SYNC:
             with self._builder(None).build() as guide:
+                refuse_patches(guide, refused)
                 with guide.with_policy(Policy()) as derived:
                     first = _entry(derived)(shape, state)
                     for _ in range(closes - 1):
@@ -445,12 +468,13 @@ class Runner:
                     second = _entry(guide)(shape, state)
                 answers = [first, second, _entry(guide)(shape, state)]
             return (answers, pool_holders(guide))
-        return asyncio.run(self._paired_async(shape, state, closes))
+        return asyncio.run(self._paired_async(shape, state, closes, refused))
 
     async def _paired_async(
-        self, shape: object, state: Json, closes: int
+        self, shape: object, state: Json, closes: int, refused: int
     ) -> tuple[list[object], int]:
         async with self._builder(None).build_async() as guide:
+            refuse_patches(guide, refused)
             async with guide.with_policy(Policy()) as derived:
                 first = await async_entry(derived)(shape, state)
                 for _ in range(closes - 1):
