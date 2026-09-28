@@ -39,7 +39,7 @@ Contract = "https://github.com/pedro-pscunha/guideme-rust/blob/main/docs/contrac
 dev = [
   "pytest==9.1.1",
   "pytest-httpserver==1.1.5",
-  "hypothesis==6.168.0",
+  "hypothesis==6.168.1",
   "opentelemetry-sdk==1.44.0",
   # The gate type-checks and lints examples/otlp, which exports over OTLP; without the
   # exporter here pyright and pylint see an unresolved import in it.
