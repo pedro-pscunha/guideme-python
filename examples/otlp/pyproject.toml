@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff==0.16.8", "pyright==1.1.414"]
+dev = ["ruff==0.16.9", "pyright==1.1.414"]
 
 # The example pins guideme by path, so `uv sync --locked` here fails when the
 # library moves under it instead of silently resolving around it.
