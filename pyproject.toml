@@ -47,7 +47,7 @@ dev = [
   "jsonschema==4.26.0",
   "pyright==1.1.414",
   "ruff==0.16.8",
-  "pylint==4.0.8",
+  "pylint==4.0.9",
   "pip-audit==2.10.1",
   "twine==7.0.0",
 ]
